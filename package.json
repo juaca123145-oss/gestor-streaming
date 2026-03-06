@@ -2,11 +2,14 @@
   "name": "gestor-streaming",
   "private": true,
   "version": "0.0.0",
+  "homepage": "https://juaca123145-oss.github.io/gestor-streaming",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist",
     "preview": "vite preview"
   },
   "dependencies": {

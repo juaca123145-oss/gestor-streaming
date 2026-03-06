@@ -6,7 +6,7 @@ import {
   Search
 } from 'lucide-react';
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzvRVGHXL-qVswcXn8QTyAQxdUjcojd7WPReX_ABQtMVLeUWxkH5EPnCjUd_BZdZxA/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxgHu2y3577y1PHzk4CJpMR86XQvkddNYayQNjZpcDzdI934SCQiiWHHqgA-5gaOs0/exec';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('home');
@@ -22,13 +22,31 @@ export default function App() {
   // Estado para el buscador
   const [searchTerm, setSearchTerm] = useState('');
   
-  // ================= CONFIGURACIONES GLOBALES =================
+  // ================= CONFIGURACIONES GLOBALES (América Completa) =================
   const prefijos = [
-    { code: '+51', country: 'Perú' }, { code: '+54', country: 'Argentina' },
-    { code: '+56', country: 'Chile' }, { code: '+57', country: 'Colombia' },
-    { code: '+593', country: 'Ecuador' }, { code: '+52', country: 'México' },
-    { code: '+1', country: 'EE.UU.' }, { code: '+34', country: 'España' },
-    { code: '+58', country: 'Venezuela'}
+    { code: '+54', country: 'Argentina' },
+    { code: '+501', country: 'Belice' },
+    { code: '+591', country: 'Bolivia' },
+    { code: '+55', country: 'Brasil' },
+    { code: '+1', country: 'Canadá' },
+    { code: '+56', country: 'Chile' },
+    { code: '+57', country: 'Colombia' },
+    { code: '+506', country: 'Costa Rica' },
+    { code: '+53', country: 'Cuba' },
+    { code: '+593', country: 'Ecuador' },
+    { code: '+503', country: 'El Salvador' },
+    { code: '+1', country: 'Estados Unidos' },
+    { code: '+502', country: 'Guatemala' },
+    { code: '+504', country: 'Honduras' },
+    { code: '+52', country: 'México' },
+    { code: '+505', country: 'Nicaragua' },
+    { code: '+507', country: 'Panamá' },
+    { code: '+595', country: 'Paraguay' },
+    { code: '+51', country: 'Perú' },
+    { code: '+1', country: 'Puerto Rico' },
+    { code: '+1', country: 'Rep. Dominicana' },
+    { code: '+598', country: 'Uruguay' },
+    { code: '+58', country: 'Venezuela' }
   ];
 
   // Estados iniciales temporales (se sobreescriben al cargar de Sheets)
@@ -235,7 +253,7 @@ export default function App() {
                            `*venció* hace *${Math.abs(dias)} días* (${fechaLimpia})`;
                            
     const textoPin = client.pin ? `, PIN: *${client.pin}*` : '';
-    const mensaje = `¡Hola ${client.nombre}! 🎬 Te escribo para recordarte que tu suscripción de *${client.plataforma}* (Cuenta: ${client.cuenta}${textoPin}) ${fraseVencimiento}. ¿Deseas renovar tu servicio con nosotros para no perder el acceso? ¡Quedo atento/a!`;
+    const mensaje = `¡Hola ${client.nombre}! 😊 Te escribo para recordarte que tu suscripción de *${client.plataforma}* (Cuenta: ${client.cuenta}${textoPin}) ${fraseVencimiento}. ¿Deseas renovar tu servicio con nosotros para no perder el acceso? ¡Quedo atento/a!`;
     window.open(`https://api.whatsapp.com/send?phone=${numero}&text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener,noreferrer');
   };
 
@@ -463,29 +481,29 @@ export default function App() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-white text-slate-500 text-xs uppercase border-b">
-                  <th className="px-6 py-4">Cliente</th>
-                  <th className="px-6 py-4">Servicio & PIN</th>
-                  <th className="px-6 py-4">Fechas</th>
-                  <th className="px-6 py-4 text-right">Acciones</th>
+                  <th className="px-6 py-4 whitespace-nowrap">Cliente</th>
+                  <th className="px-6 py-4 whitespace-nowrap">Servicio & PIN</th>
+                  <th className="px-6 py-4 whitespace-nowrap">Fechas</th>
+                  <th className="px-6 py-4 text-right whitespace-nowrap">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredClients.map(client => (
                   <tr key={client.id} className="hover:bg-slate-50 group">
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="font-bold text-slate-800">{client.nombre}</div>
                       <div className="text-sm text-slate-500 flex items-center gap-1"><Phone className="w-3 h-3"/> {client.prefijo} {client.telefono}</div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="inline-flex items-center px-2 py-1 rounded text-xs font-bold bg-slate-100 text-slate-700 mb-1">{client.plataforma}</div>
                       <div className="text-sm text-slate-600 truncate max-w-[200px]">{client.cuenta}</div>
                       {client.pin && <div className="text-xs text-indigo-600 font-bold mt-1 bg-indigo-50 inline-block px-2 py-0.5 rounded border border-indigo-100"><Lock className="w-3 h-3 inline mr-1 -mt-0.5"/>PIN: {client.pin}</div>}
                     </td>
-                    <td className="px-6 py-4">
-                      <div className={`inline-flex px-2 py-1 rounded-full text-xs font-bold border ${getDaysBadgeColor(calcularDiasRestantes(client.diaExpiracion))}`}>{calcularDiasRestantes(client.diaExpiracion)} días</div>
-                      <div className="text-xs text-slate-400 mt-1"><CalendarDays className="w-3 h-3 inline"/> Expira: {client.diaExpiracion ? String(client.diaExpiracion).split('T')[0] : 'N/A'}</div>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className={`inline-flex px-3 py-1 rounded-full text-xs font-bold border ${getDaysBadgeColor(calcularDiasRestantes(client.diaExpiracion))}`}>{calcularDiasRestantes(client.diaExpiracion)} días</div>
+                      <div className="text-xs text-slate-400 mt-2 flex items-center gap-1"><CalendarDays className="w-3 h-3"/> Expira: {client.diaExpiracion ? String(client.diaExpiracion).split('T')[0] : 'N/A'}</div>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right whitespace-nowrap">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg"><Pencil className="w-4 h-4"/></button>
                         <button onClick={() => sendWhatsApp(client)} className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg"><MessageCircle className="w-4 h-4"/></button>
@@ -544,16 +562,22 @@ export default function App() {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-white text-slate-500 text-xs uppercase border-b">
-                      <th className="px-6 py-4">Cliente</th><th className="px-6 py-4">PIN</th><th className="px-6 py-4">Días Restantes</th><th className="px-6 py-4 text-right">Acciones</th>
+                      <th className="px-6 py-4 whitespace-nowrap">Cliente</th>
+                      <th className="px-6 py-4 whitespace-nowrap">PIN</th>
+                      <th className="px-6 py-4 whitespace-nowrap">Días Restantes</th>
+                      <th className="px-6 py-4 text-right whitespace-nowrap">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {perfilesAsociados.map(client => (
                       <tr key={client.id} className="hover:bg-slate-50 group">
-                        <td className="px-6 py-4 font-bold text-slate-800">{client.nombre}</td>
-                        <td className="px-6 py-4">{client.pin ? <div className="text-sm text-indigo-600 font-bold bg-indigo-50 inline-block px-3 py-1 rounded border border-indigo-100"><Lock className="w-3 h-3 inline mr-1 -mt-0.5"/>{client.pin}</div> : <span className="text-slate-400 text-sm">N/A</span>}</td>
-                        <td className="px-6 py-4"><div className={`inline-flex px-2 py-1 rounded-full text-xs font-bold border ${getDaysBadgeColor(calcularDiasRestantes(client.diaExpiracion))}`}>{calcularDiasRestantes(client.diaExpiracion)} días</div></td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-6 py-4 font-bold text-slate-800 whitespace-nowrap">{client.nombre}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{client.pin ? <div className="text-sm text-indigo-600 font-bold bg-indigo-50 inline-block px-3 py-1 rounded border border-indigo-100"><Lock className="w-3 h-3 inline mr-1 -mt-0.5"/>{client.pin}</div> : <span className="text-slate-400 text-sm">N/A</span>}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className={`inline-flex px-3 py-1 rounded-full text-xs font-bold border ${getDaysBadgeColor(calcularDiasRestantes(client.diaExpiracion))}`}>{calcularDiasRestantes(client.diaExpiracion)} días</div>
+                          <div className="text-xs text-slate-400 mt-2 flex items-center gap-1"><CalendarDays className="w-3 h-3"/> Expira: {client.diaExpiracion ? String(client.diaExpiracion).split('T')[0] : 'N/A'}</div>
+                        </td>
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
                           <div className="flex justify-end gap-2">
                             <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg"><Pencil className="w-4 h-4"/></button>
                             <button onClick={() => sendWhatsApp(client)} className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg"><MessageCircle className="w-4 h-4"/></button>
