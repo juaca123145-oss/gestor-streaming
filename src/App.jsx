@@ -266,7 +266,7 @@ export default function App() {
     setAccounts([...accounts, accData]);
     
     try {
-      await fetch(SCRIPT_URL, { 
+      await fetch(SCRIPT_URL, {
         method: 'POST', mode: 'no-cors', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'save_account', data: accData }) 
