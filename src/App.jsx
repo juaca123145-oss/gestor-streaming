@@ -3,7 +3,7 @@ import {
   Users, Plus, MessageCircle, Trash2, CalendarDays, MonitorPlay, 
   Phone, Pencil, Loader2, Home, UserPlus, FolderOpen, KeyRound, 
   ChevronLeft, Lock, Copy, ArrowLeft, Settings, X, Globe, DollarSign, Save,
-  Search
+  Search, Send, FileText
 } from 'lucide-react';
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxgHu2y3577y1PHzk4CJpMR86XQvkddNYayQNjZpcDzdI934SCQiiWHHqgA-5gaOs0/exec';
@@ -22,38 +22,35 @@ export default function App() {
   // Estado para el buscador
   const [searchTerm, setSearchTerm] = useState('');
   
-  // ================= CONFIGURACIONES GLOBALES (América Completa) =================
+  // ================= CONFIGURACIONES GLOBALES =================
   const prefijos = [
-    { code: '+54', country: 'Argentina' },
-    { code: '+501', country: 'Belice' },
-    { code: '+591', country: 'Bolivia' },
-    { code: '+55', country: 'Brasil' },
-    { code: '+1', country: 'Canadá' },
-    { code: '+56', country: 'Chile' },
-    { code: '+57', country: 'Colombia' },
-    { code: '+506', country: 'Costa Rica' },
-    { code: '+53', country: 'Cuba' },
-    { code: '+593', country: 'Ecuador' },
-    { code: '+503', country: 'El Salvador' },
-    { code: '+1', country: 'Estados Unidos' },
-    { code: '+502', country: 'Guatemala' },
-    { code: '+504', country: 'Honduras' },
-    { code: '+52', country: 'México' },
-    { code: '+505', country: 'Nicaragua' },
-    { code: '+507', country: 'Panamá' },
-    { code: '+595', country: 'Paraguay' },
-    { code: '+51', country: 'Perú' },
-    { code: '+1', country: 'Puerto Rico' },
-    { code: '+1', country: 'Rep. Dominicana' },
-    { code: '+598', country: 'Uruguay' },
+    { code: '+54', country: 'Argentina' }, { code: '+501', country: 'Belice' },
+    { code: '+591', country: 'Bolivia' }, { code: '+55', country: 'Brasil' },
+    { code: '+1', country: 'Canadá' }, { code: '+56', country: 'Chile' },
+    { code: '+57', country: 'Colombia' }, { code: '+506', country: 'Costa Rica' },
+    { code: '+53', country: 'Cuba' }, { code: '+593', country: 'Ecuador' },
+    { code: '+503', country: 'El Salvador' }, { code: '+1', country: 'Estados Unidos' },
+    { code: '+502', country: 'Guatemala' }, { code: '+504', country: 'Honduras' },
+    { code: '+52', country: 'México' }, { code: '+505', country: 'Nicaragua' },
+    { code: '+507', country: 'Panamá' }, { code: '+595', country: 'Paraguay' },
+    { code: '+51', country: 'Perú' }, { code: '+1', country: 'Puerto Rico' },
+    { code: '+1', country: 'Rep. Dominicana' }, { code: '+598', country: 'Uruguay' },
     { code: '+58', country: 'Venezuela' }
   ];
+
+  const defaultConditionStr = "Reglas del servicio:📵 Usar en un dispositivo. 📵 No eliminar los perfiles.📵 No tocar el plan de pago. 📵 No cambiar el acceso.📵 No modificar nada sin avisar.📵 No forzar la contraseña si no ingresa, comunicar de inmediato. ⭕ Si desea continuar con el mismo perfil avisar un día antes que cumpla los 30 dias.📝 Si incumple se detectará y perderá la garantía. ❌ En caso de algún inconveniente la solución se dará entre 1 a 24 horas en el peor de los casos, de presentarse una caída masiva y no se pueda solucionar dentro de las 24 horas, al día siguiente se procederá a reembolsar en su Billetera el saldo pendiente.";
 
   // Estados iniciales temporales (se sobreescriben al cargar de Sheets)
   const [plataformas, setPlataformas] = useState(['Netflix', 'Disney+', 'Max', 'Prime Video', 'Spotify', 'YouTube Premium', 'Crunchyroll', 'Otro']);
   const [currency, setCurrency] = useState('S/.');
   const [defaultPrefix, setDefaultPrefix] = useState('+51');
   const [newPlatformName, setNewPlatformName] = useState('');
+  
+  // Nuevos estados para condiciones y proveedor
+  const [providerName, setProviderName] = useState('valezka_rondon');
+  const [providerPhone, setProviderPhone] = useState('+ 51903242961');
+  const [platformConditions, setPlatformConditions] = useState({});
+  const [editingPlatformCondition, setEditingPlatformCondition] = useState('Netflix');
 
   // ================= ESTADOS DE FORMULARIOS =================
   const [formData, setFormData] = useState({
@@ -77,12 +74,18 @@ export default function App() {
           const loadedPlat = data.settings.plataformas ? JSON.parse(data.settings.plataformas) : plataformas;
           const loadedCurr = data.settings.moneda || currency;
           const loadedPref = data.settings.prefijo_defecto || defaultPrefix;
+          const loadedProvName = data.settings.proveedor_nombre || providerName;
+          const loadedProvPhone = data.settings.proveedor_telefono || providerPhone;
+          const loadedConds = data.settings.condiciones_plataformas ? JSON.parse(data.settings.condiciones_plataformas) : {};
           
           setPlataformas(loadedPlat);
           setCurrency(loadedCurr);
           setDefaultPrefix(loadedPref);
+          setProviderName(loadedProvName);
+          setProviderPhone(loadedProvPhone);
+          setPlatformConditions(loadedConds);
+          setEditingPlatformCondition(loadedPlat[0] || 'Netflix');
           
-          // Actualizamos el formulario vacío para que use los valores que bajaron de la nube
           setFormData(prev => ({
             ...prev,
             prefijo: loadedPref,
@@ -104,7 +107,10 @@ export default function App() {
     const settingsData = {
       plataformas: JSON.stringify(plataformas),
       moneda: currency,
-      prefijo_defecto: defaultPrefix
+      prefijo_defecto: defaultPrefix,
+      proveedor_nombre: providerName,
+      proveedor_telefono: providerPhone,
+      condiciones_plataformas: JSON.stringify(platformConditions)
     };
 
     try {
@@ -113,7 +119,7 @@ export default function App() {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'save_settings', data: settingsData }) 
       });
-      alert("¡Ajustes guardados en la nube con éxito! (Nota: Asegúrate de haber ejecutado 'setup()' en tu Apps Script)");
+      alert("¡Ajustes guardados en la nube con éxito!");
     } catch (error) { 
       console.error("Error guardando ajustes:", error);
       alert("Hubo un error al guardar los ajustes.");
@@ -240,6 +246,7 @@ export default function App() {
     } catch (error) { console.error("Error eliminando cliente:", error); }
   };
 
+  // Botón: Avisar Vencimiento
   const sendWhatsApp = (client) => {
     if (!client.telefono) return alert("Este cliente no tiene teléfono.");
     
@@ -254,6 +261,37 @@ export default function App() {
                            
     const textoPin = client.pin ? `, PIN: *${client.pin}*` : '';
     const mensaje = `¡Hola ${client.nombre}! 🎬 Te escribo para recordarte que tu suscripción de *${client.plataforma}* (Cuenta: ${client.cuenta}${textoPin}) ${fraseVencimiento}. ¿Deseas renovar tu servicio con nosotros para no perder el acceso? ¡Quedo atento/a!`;
+    window.open(`https://api.whatsapp.com/send?phone=${numero}&text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  // Botón: Enviar Credenciales y Condiciones
+  const sendConditionsWhatsApp = (client) => {
+    if (!client.telefono) return alert("Este cliente no tiene teléfono registrado.");
+    
+    // Buscar la contraseña de la cuenta maestra
+    const cuentaAsociada = accounts.find(a => a.correo === client.cuenta);
+    const password = cuentaAsociada?.contrasena ? cuentaAsociada.contrasena : '';
+    
+    let numero = (String(client.prefijo || defaultPrefix) + String(client.telefono)).replace(/\D/g, '');
+    const dias = calcularDiasRestantes(client.diaExpiracion);
+    const condicionActual = platformConditions[client.plataforma] || defaultConditionStr;
+    const fechaCompraLimpia = client.diaCompra ? String(client.diaCompra).split('T')[0] : '';
+    const fechaExpLimpia = client.diaExpiracion ? String(client.diaExpiracion).split('T')[0] : '';
+
+    const mensaje = `*${client.plataforma}* 📌\n` +
+      `Correo: ${client.cuenta || ''}\n` +
+      `Contraseña: ${password}\n` +
+      `Perfil/usuario: ${client.nombre}\n` +
+      `PIN: ${client.pin || ''}\n` +
+      `⏳ Contratado: ${dias} días restantes\n` +
+      `🗓 Compra: ${fechaCompraLimpia}\n` +
+      `🗓 Vencimiento: ${fechaExpLimpia}\n\n` +
+      `⚠️ *Condiciones de uso:*\n${condicionActual}\n\n` +
+      `👤 Proveedor: ${providerName}\n` +
+      `📞 Teléfono: ${providerPhone}\n` +
+      `🎬🍿🎬🍿🎬🍿🎬🍿🎬🍿🎬\n` +
+      `¡¡Muchas gracias por su compra!!`;
+
     window.open(`https://api.whatsapp.com/send?phone=${numero}&text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener,noreferrer');
   };
 
@@ -324,7 +362,7 @@ export default function App() {
         </button>
         <button onClick={() => setCurrentView('settings')} className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:border-slate-400 transition-all flex flex-col items-center text-center gap-4">
           <div className="bg-slate-100 p-4 rounded-full group-hover:bg-slate-600 group-hover:text-white text-slate-600"><Settings className="w-8 h-8" /></div>
-          <div><h3 className="text-lg font-bold text-slate-800">Ajustes</h3><p className="text-xs text-slate-500 mt-1">Plataformas y Moneda.</p></div>
+          <div><h3 className="text-lg font-bold text-slate-800">Ajustes</h3><p className="text-xs text-slate-500 mt-1">Reglas, Moneda y +.</p></div>
         </button>
       </div>
     </div>
@@ -504,10 +542,19 @@ export default function App() {
                       <div className="text-xs text-slate-400 mt-2 flex items-center gap-1"><CalendarDays className="w-3 h-3"/> Expira: {client.diaExpiracion ? String(client.diaExpiracion).split('T')[0] : 'N/A'}</div>
                     </td>
                     <td className="px-6 py-4 text-right whitespace-nowrap">
-                      <div className="flex justify-end gap-2">
-                        <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg"><Pencil className="w-4 h-4"/></button>
-                        <button onClick={() => sendWhatsApp(client)} className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg"><MessageCircle className="w-4 h-4"/></button>
-                        <button onClick={() => handleDelete(client.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => sendConditionsWhatsApp(client)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg" title="Enviar Cuenta y Condiciones">
+                          <Send className="w-4 h-4"/>
+                        </button>
+                        <button onClick={() => sendWhatsApp(client)} className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg" title="Recordatorio de Vencimiento">
+                          <MessageCircle className="w-4 h-4"/>
+                        </button>
+                        <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg" title="Editar">
+                          <Pencil className="w-4 h-4"/>
+                        </button>
+                        <button onClick={() => handleDelete(client.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg" title="Eliminar">
+                          <Trash2 className="w-4 h-4"/>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -578,10 +625,19 @@ export default function App() {
                           <div className="text-xs text-slate-400 mt-2 flex items-center gap-1"><CalendarDays className="w-3 h-3"/> Expira: {client.diaExpiracion ? String(client.diaExpiracion).split('T')[0] : 'N/A'}</div>
                         </td>
                         <td className="px-6 py-4 text-right whitespace-nowrap">
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg"><Pencil className="w-4 h-4"/></button>
-                            <button onClick={() => sendWhatsApp(client)} className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg"><MessageCircle className="w-4 h-4"/></button>
-                            <button onClick={() => handleDelete(client.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                          <div className="flex justify-end gap-1.5">
+                            <button onClick={() => sendConditionsWhatsApp(client)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg" title="Enviar Cuenta y Condiciones">
+                              <Send className="w-4 h-4"/>
+                            </button>
+                            <button onClick={() => sendWhatsApp(client)} className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg" title="Recordatorio de Vencimiento">
+                              <MessageCircle className="w-4 h-4"/>
+                            </button>
+                            <button onClick={() => handleEdit(client)} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg" title="Editar">
+                              <Pencil className="w-4 h-4"/>
+                            </button>
+                            <button onClick={() => handleDelete(client.id)} className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg" title="Eliminar">
+                              <Trash2 className="w-4 h-4"/>
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -650,9 +706,9 @@ export default function App() {
   };
 
   const renderSettings = () => (
-    <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-300">
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-300">
       
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Settings className="w-7 h-7 text-slate-500" /> Configuración en la Nube</h2>
           <p className="text-slate-500 text-sm mt-1">Estos cambios se guardarán en tu Google Sheets para todos tus dispositivos.</p>
@@ -667,72 +723,112 @@ export default function App() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 mb-4 border-b pb-2"><Globe className="w-5 h-5 text-indigo-500" /> Preferencias Regionales</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Moneda Local</label>
-              <div className="relative">
-                <DollarSign className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-                <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full pl-9 pr-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-                  <option value="S/.">Soles (S/.)</option>
-                  <option value="$">Dólares ($)</option>
-                  <option value="€">Euros (€)</option>
-                  <option value="Mex$">Pesos Mexicanos (Mex$)</option>
-                  <option value="Col$">Pesos Colombianos (Col$)</option>
-                  <option value="Arg$">Pesos Argentinos (Arg$)</option>
-                  <option value="CLP$">Pesos Chilenos (CLP$)</option>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 mb-4 border-b pb-2"><Globe className="w-5 h-5 text-indigo-500" /> Preferencias Generales</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Moneda Local</label>
+                <div className="relative">
+                  <DollarSign className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full pl-9 pr-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                    <option value="S/.">Soles (S/.)</option>
+                    <option value="$">Dólares ($)</option>
+                    <option value="€">Euros (€)</option>
+                    <option value="Mex$">Pesos Mexicanos (Mex$)</option>
+                    <option value="Col$">Pesos Colombianos (Col$)</option>
+                    <option value="Arg$">Pesos Argentinos (Arg$)</option>
+                    <option value="CLP$">Pesos Chilenos (CLP$)</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Prefijo de País por Defecto</label>
+                <select value={defaultPrefix} onChange={(e) => setDefaultPrefix(e.target.value)} className="w-full px-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                  {prefijos.map(p => <option key={p.country} value={p.code}>{p.country} ({p.code})</option>)}
                 </select>
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Prefijo de País por Defecto</label>
-              <select value={defaultPrefix} onChange={(e) => setDefaultPrefix(e.target.value)} className="w-full px-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-                {prefijos.map(p => <option key={p.country} value={p.code}>{p.country} ({p.code})</option>)}
-              </select>
-              <p className="text-xs text-slate-500 mt-1">Este prefijo se seleccionará automáticamente al agregar un nuevo cliente.</p>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 mb-4 border-b pb-2"><Users className="w-5 h-5 text-indigo-500" /> Datos del Proveedor</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Nombre / Empresa</label>
+                <input type="text" value={providerName} onChange={(e) => setProviderName(e.target.value)} className="w-full px-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Ej. valezka_rondon" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Teléfono de Soporte</label>
+                <input type="text" value={providerPhone} onChange={(e) => setProviderPhone(e.target.value)} className="w-full px-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Ej. +51 987654321" />
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 mb-4 border-b pb-2"><MonitorPlay className="w-5 h-5 text-indigo-500" /> Plataformas de Streaming</h3>
-          <form 
-            onSubmit={(e) => {
-              e.preventDefault();
-              if(newPlatformName.trim() && !plataformas.includes(newPlatformName.trim())) {
-                setPlataformas([...plataformas, newPlatformName.trim()]);
-                setNewPlatformName('');
-              }
-            }} 
-            className="flex gap-2 mb-4"
-          >
-            <input type="text" value={newPlatformName} onChange={(e) => setNewPlatformName(e.target.value)} placeholder="Añadir plataforma (ej. Vix)" className="flex-1 px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
-            <button type="submit" className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg font-bold text-sm transition-colors">Añadir</button>
-          </form>
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 mb-4 border-b pb-2"><MonitorPlay className="w-5 h-5 text-indigo-500" /> Plataformas y Condiciones</h3>
+            
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                if(newPlatformName.trim() && !plataformas.includes(newPlatformName.trim())) {
+                  setPlataformas([...plataformas, newPlatformName.trim()]);
+                  setNewPlatformName('');
+                }
+              }} 
+              className="flex gap-2 mb-4"
+            >
+              <input type="text" value={newPlatformName} onChange={(e) => setNewPlatformName(e.target.value)} placeholder="Añadir plataforma (ej. Vix)" className="flex-1 px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+              <button type="submit" className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg font-bold text-sm transition-colors">Añadir</button>
+            </form>
 
-          <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto p-1">
-            {plataformas.map(plat => (
-              <div key={plat} className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2">
-                {plat}
-                <button 
-                  onClick={() => {
-                    if(plataformas.length > 1) {
-                      setPlataformas(plataformas.filter(p => p !== plat));
-                    } else {
-                      alert("Debes tener al menos una plataforma configurada.");
-                    }
-                  }} 
-                  className="hover:bg-indigo-200 rounded-full p-0.5 transition-colors"
-                  title="Eliminar plataforma"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
+            <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto p-1 mb-6">
+              {plataformas.map(plat => (
+                <div key={plat} className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1 rounded-full text-sm font-bold flex items-center gap-2">
+                  {plat}
+                  <button 
+                    onClick={() => {
+                      if(plataformas.length > 1) {
+                        setPlataformas(plataformas.filter(p => p !== plat));
+                      } else {
+                        alert("Debes tener al menos una plataforma configurada.");
+                      }
+                    }} 
+                    className="hover:bg-indigo-200 rounded-full p-0.5 transition-colors"
+                    title="Eliminar plataforma"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><FileText className="w-4 h-4 text-indigo-500"/> Editar Condiciones de:</label>
+              <select 
+                value={editingPlatformCondition} 
+                onChange={(e) => setEditingPlatformCondition(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white mb-3 text-sm font-bold text-indigo-700"
+              >
+                {plataformas.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <textarea 
+                rows="8"
+                value={platformConditions[editingPlatformCondition] !== undefined ? platformConditions[editingPlatformCondition] : defaultConditionStr}
+                onChange={(e) => setPlatformConditions({...platformConditions, [editingPlatformCondition]: e.target.value})}
+                className="w-full px-3 py-3 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 text-sm leading-relaxed"
+                placeholder="Escribe aquí las condiciones específicas para esta plataforma..."
+              />
+              <p className="text-xs text-slate-500 mt-2">Este texto se incluirá automáticamente cuando envíes los accesos de una cuenta de <b>{editingPlatformCondition}</b>.</p>
+            </div>
+
           </div>
         </div>
+
       </div>
     </div>
   );
