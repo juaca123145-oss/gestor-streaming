@@ -253,7 +253,7 @@ export default function App() {
                            `*venció* hace *${Math.abs(dias)} días* (${fechaLimpia})`;
                            
     const textoPin = client.pin ? `, PIN: *${client.pin}*` : '';
-    const mensaje = `¡Hola ${client.nombre}! 😊 Te escribo para recordarte que tu suscripción de *${client.plataforma}* (Cuenta: ${client.cuenta}${textoPin}) ${fraseVencimiento}. ¿Deseas renovar tu servicio con nosotros para no perder el acceso? ¡Quedo atento/a!`;
+    const mensaje = `¡Hola ${client.nombre}! 🎬 Te escribo para recordarte que tu suscripción de *${client.plataforma}* (Cuenta: ${client.cuenta}${textoPin}) ${fraseVencimiento}. ¿Deseas renovar tu servicio con nosotros para no perder el acceso? ¡Quedo atento/a!`;
     window.open(`https://api.whatsapp.com/send?phone=${numero}&text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener,noreferrer');
   };
 
@@ -266,7 +266,7 @@ export default function App() {
     setAccounts([...accounts, accData]);
     
     try {
-      await fetch(SCRIPT_URL, {
+      await fetch(SCRIPT_URL, { 
         method: 'POST', mode: 'no-cors', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'save_account', data: accData }) 
@@ -351,7 +351,7 @@ export default function App() {
             <label className="block text-sm font-medium mb-1">WhatsApp</label>
             <div className="flex gap-2">
               <select name="prefijo" value={formData.prefijo} onChange={handleChange} className="w-1/3 px-2 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-                {prefijos.map(p => <option key={p.code} value={p.code}>{p.code}</option>)}
+                {prefijos.map(p => <option key={p.country} value={p.code}>{p.code}</option>)}
               </select>
               <input type="text" name="telefono" value={formData.telefono} onChange={handleChange} className="w-2/3 px-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500" />
             </div>
@@ -689,7 +689,7 @@ export default function App() {
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Prefijo de País por Defecto</label>
               <select value={defaultPrefix} onChange={(e) => setDefaultPrefix(e.target.value)} className="w-full px-4 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-                {prefijos.map(p => <option key={p.code} value={p.code}>{p.country} ({p.code})</option>)}
+                {prefijos.map(p => <option key={p.country} value={p.code}>{p.country} ({p.code})</option>)}
               </select>
               <p className="text-xs text-slate-500 mt-1">Este prefijo se seleccionará automáticamente al agregar un nuevo cliente.</p>
             </div>
