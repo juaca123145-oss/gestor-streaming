@@ -6,7 +6,7 @@ import {
   Search, Send, FileText, Filter, ArrowUpDown, RefreshCw
 } from 'lucide-react';
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzvRVGHXL-qVswcXn8QTyAQxdUjcojd7WPReX_ABQtMVLeUWxkH5EPnCjUd_BZdZxA/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbznfCoYQuv24W61AkA_kZFbE_Vkh0fkv8cNixcLBAcmfLh3HKbzSSL45UUxm33LlJw/exec';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('home');
