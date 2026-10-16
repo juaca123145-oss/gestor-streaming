@@ -45,6 +45,9 @@ assert status == 200 and len(charts['meses']) == 12
 assert charts['meses'][-1]['mes'] == summary['fecha'][:7]
 assert charts['meses'][-1]['margenCentimos'] == summary['margenMesCentimos']
 assert sum(row['suscripciones'] for row in charts['plataformas']) == 456
+status, config = call('/api/configuracion')
+assert status == 200 and config['moneda'] == 'S/.' and config['prefijoDefecto'] == '+51'
+assert isinstance(config['condiciones'], dict)
 status, accounts = call('/api/cuentas')
 assert status == 200 and len(accounts['items']) == 66
 assert all(account['venceEl'] is None and account['fechaCompra'] is None for account in accounts['items'])

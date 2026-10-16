@@ -111,6 +111,56 @@ async function analytics(env) {
   return json({ meses: months, plataformas: platforms.results });
 }
 
+async function getSettings(env) {
+  const result = await env.DB.prepare(`SELECT clave, valor FROM configuracion
+    WHERE clave IN ('moneda', 'prefijo_defecto', 'proveedor_nombre', 'proveedor_telefono', 'condiciones_plataformas')`).all();
+  const values = Object.fromEntries(result.results.map((row) => [row.clave, row.valor]));
+  let conditions = {};
+  try {
+    const parsed = JSON.parse(values.condiciones_plataformas || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) conditions = parsed;
+  } catch { /* Conservar el texto original en D1; la interfaz usa condiciones vacías. */ }
+  return json({ moneda: values.moneda || 'S/.', prefijoDefecto: values.prefijo_defecto || '+51',
+    proveedorNombre: values.proveedor_nombre || '', proveedorTelefono: values.proveedor_telefono || '',
+    condiciones: conditions });
+}
+
+async function saveSettings(request, env) {
+  const body = await bodyOf(request);
+  if (!body || typeof body.prefijoDefecto !== 'string' || !/^\+\d{1,4}$/.test(body.prefijoDefecto)
+    || typeof body.proveedorNombre !== 'string' || body.proveedorNombre.length > 150
+    || typeof body.proveedorTelefono !== 'string' || body.proveedorTelefono.length > 50
+    || !body.condiciones || typeof body.condiciones !== 'object' || Array.isArray(body.condiciones)) {
+    return error('Ajustes inválidos');
+  }
+  const platformRows = await env.DB.prepare('SELECT nombre FROM plataformas').all();
+  const names = new Set(platformRows.results.map((row) => row.nombre));
+  const conditions = {};
+  for (const [name, value] of Object.entries(body.condiciones)) {
+    if (!names.has(name) || typeof value !== 'string' || value.length > 4000) return error('Condiciones inválidas');
+    conditions[name] = value;
+  }
+  await env.DB.batch([
+    ...[['prefijo_defecto', body.prefijoDefecto], ['proveedor_nombre', body.proveedorNombre.trim()],
+      ['proveedor_telefono', body.proveedorTelefono.trim()],
+      ['condiciones_plataformas', JSON.stringify(conditions)]].map(([key, value]) =>
+      env.DB.prepare(`INSERT INTO configuracion (clave, valor) VALUES (?, ?)
+        ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`).bind(key, value)),
+  ]);
+  return json({ ok: true });
+}
+
+async function addPlatform(request, env) {
+  const body = await bodyOf(request);
+  if (!body || !textField(body.nombre, 80)) return error('Nombre de plataforma inválido');
+  const name = body.nombre.trim();
+  const existing = await env.DB.prepare('SELECT id FROM plataformas WHERE nombre = ? COLLATE NOCASE').bind(name).first();
+  if (existing) return error('La plataforma ya existe', 409);
+  const id = uuid();
+  await env.DB.prepare('INSERT INTO plataformas (id, nombre) VALUES (?, ?)').bind(id, name).run();
+  return json({ id, nombre: name }, 201);
+}
+
 async function listClients(url, env) {
   const page = Math.max(1, Math.min(10_000, Number.parseInt(url.searchParams.get('pagina') || '1', 10) || 1));
   const rawLimit = Number.parseInt(url.searchParams.get('limite') || '25', 10) || 25;
@@ -398,6 +448,10 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/session') return json({ correo: actor.correo, rol: actor.rol });
       if (request.method === 'GET' && url.pathname === '/api/resumen') return summary(env);
       if (request.method === 'GET' && url.pathname === '/api/estadisticas') return analytics(env);
+      if (request.method === 'GET' && url.pathname === '/api/configuracion') return getSettings(env);
+      if (request.method === 'PATCH' && url.pathname === '/api/configuracion') {
+        return mayManageAccounts(actor) ? saveSettings(request, env) : error('Sin permiso', 403);
+      }
       if (request.method === 'GET' && url.pathname === '/api/proximos') return upcomingClients(env);
       if (request.method === 'GET' && url.pathname === '/api/clientes') return listClients(url, env);
       const client = url.pathname.match(/^\/api\/clientes\/([^/]+)$/);
@@ -406,6 +460,9 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/plataformas') {
         const result = await env.DB.prepare('SELECT id, nombre FROM plataformas ORDER BY nombre').all();
         return json({ items: result.results });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/plataformas') {
+        return mayManageAccounts(actor) ? addPlatform(request, env) : error('Sin permiso', 403);
       }
       if (request.method === 'GET' && url.pathname === '/api/cuentas') return listAccounts(env);
       if (request.method === 'POST' && url.pathname === '/api/cuentas') {

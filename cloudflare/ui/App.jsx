@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, RefreshCw, KeyRound, Plus, Search, X,
-  ArrowRight, Eye, EyeOff, CalendarDays, AlertCircle, Wallet, MessageCircle,
+  ArrowRight, Eye, EyeOff, CalendarDays, AlertCircle, Wallet, MessageCircle, Settings,
 } from 'lucide-react';
 import { demoApi } from './demo.js';
 
@@ -99,6 +99,8 @@ export default function App() {
   const [upcoming, setUpcoming] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [platforms, setPlatforms] = useState([]);
+  const [settingsDraft, setSettingsDraft] = useState({ moneda: 'S/.', prefijoDefecto: '+51', proveedorNombre: '', proveedorTelefono: '', condiciones: {} });
+  const [newPlatformName, setNewPlatformName] = useState('');
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [searchDraft, setSearchDraft] = useState('');
@@ -116,11 +118,12 @@ export default function App() {
   const [notice, setNotice] = useState('');
 
   async function loadOverview() {
-    const [s, a, p, u, charts] = await Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/estadisticas')]);
+    const [s, a, p, u, charts, config] = await Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/estadisticas'), api('/configuracion')]);
     setSummary(s);
     setAnalytics(charts);
     setAccounts(a.items);
     setPlatforms(p.items);
+    setSettingsDraft(config);
     setUpcoming(u.items);
   }
 
@@ -133,11 +136,11 @@ export default function App() {
   useEffect(() => {
     let active = true;
     (DEMO ? Promise.resolve() : api('/session'))
-      .then(() => Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/clientes?pagina=1&limite=25'), api('/estadisticas')]))
-      .then(([s, a, p, u, c, charts]) => {
+      .then(() => Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/clientes?pagina=1&limite=25'), api('/estadisticas'), api('/configuracion')]))
+      .then(([s, a, p, u, c, charts, config]) => {
         if (!active) return;
         setSignedIn(true);
-        setSummary(s); setAnalytics(charts); setAccounts(a.items); setPlatforms(p.items); setUpcoming(u.items); setClients(c.items); setTotal(c.total);
+        setSummary(s); setAnalytics(charts); setAccounts(a.items); setPlatforms(p.items); setSettingsDraft(config); setUpcoming(u.items); setClients(c.items); setTotal(c.total);
       })
       .catch((cause) => { if (active && cause.message !== 'Acceso no autorizado') setError(cause.message); })
       .finally(() => { if (active) setLoading(false); });
@@ -180,7 +183,7 @@ export default function App() {
   }
 
   function openClientForm() {
-    setClientForm({ ...emptyClient(), plataformaId: platforms[0]?.id || '' });
+    setClientForm({ ...emptyClient(), prefijo: settingsDraft.prefijoDefecto, plataformaId: platforms[0]?.id || '' });
     setModal('cliente');
   }
 
@@ -241,6 +244,25 @@ export default function App() {
     finally { setBusy(false); }
   }
 
+  async function saveSettings(event) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      await api('/configuracion', { method: 'PATCH', body: JSON.stringify(settingsDraft) });
+      flash('Ajustes guardados.');
+      await loadOverview();
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  }
+
+  async function createPlatform(event) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      await api('/plataformas', { method: 'POST', body: JSON.stringify({ nombre: newPlatformName }) });
+      setNewPlatformName(''); flash('Plataforma añadida.'); await loadOverview();
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  }
+
   function editAccount(account) {
     setEditingAccountId(account.id);
     setAccountForm({ plataformaId: account.plataformaId, identificador: account.identificador,
@@ -262,11 +284,12 @@ export default function App() {
     { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
     { id: 'clientes', label: 'Clientes', icon: Users },
     { id: 'cuentas', label: 'Cuentas', icon: KeyRound },
+    { id: 'ajustes', label: 'Ajustes', icon: Settings },
   ];
 
   const title = view === 'resumen' ? 'Resumen de suscripciones'
     : view === 'clientes' ? 'Directorio de clientes'
-      : view === 'cuentas' ? 'Cuentas de servicio' : selected?.nombre || 'Cliente';
+      : view === 'cuentas' ? 'Cuentas de servicio' : view === 'ajustes' ? 'Configuración' : selected?.nombre || 'Cliente';
   const accountGroups = platforms.map((platform) => ({ ...platform,
     items: accounts.filter((account) => account.plataformaId === platform.id),
   })).filter((group) => group.items.length);
@@ -301,7 +324,8 @@ export default function App() {
         <div className="page-head"><div><p className="eyebrow">DoroStream</p><h1>{title}</h1>
           <p className="sub">{view === 'resumen' ? 'Vencimientos, movimientos y trabajo pendiente en un solo lugar.'
             : view === 'clientes' ? 'Busca clientes y consulta el estado de cada suscripción.'
-              : view === 'cuentas' ? 'Gestiona el acceso a tus cuentas de servicio.' : 'Suscripciones y movimientos registrados.'}</p></div>
+              : view === 'cuentas' ? 'Gestiona el acceso a tus cuentas de servicio.'
+                : view === 'ajustes' ? 'Edita datos del proveedor, prefijo y condiciones por plataforma.' : 'Suscripciones y movimientos registrados.'}</p></div>
           {view === 'clientes' && <button className="primary" onClick={openClientForm}><Plus size={17} />Nuevo cliente</button>}
           {view === 'cuentas' && <button className="primary" onClick={() => { setEditingAccountId(null); setAccountForm({ ...emptyAccount(), plataformaId: platforms[0]?.id || '' }); setModal('cuenta'); }}><Plus size={17} />Nueva cuenta</button>}
         </div>
@@ -342,6 +366,15 @@ export default function App() {
 
         {view === 'cuentas' && <section className="panel"><div className="panel-head"><div><h2>Inventario de cuentas</h2><p>{accounts.length} cuentas agrupadas por plataforma. Abre un grupo para ver sus cuentas y vencimientos.</p></div></div><div className="account-groups">{accountGroups.map((group, index) => <details className="account-group" key={group.id} open={index === 0}><summary><span>{group.nombre}</span><span className="group-count">{group.items.length} {group.items.length === 1 ? 'cuenta' : 'cuentas'}</span></summary><div className="list">{group.items.map((a) => <div className="account-row" key={a.id}><span className="account-mark"><KeyRound size={18} /></span><div className="account-info"><strong>{a.identificador}</strong><small>{a.perfilesAsignados} perfiles · Compra: {a.fechaCompra || 'Sin fecha'} · Vence: {a.venceEl || 'Sin fecha'}</small>{a.codigosUrl && <a href={a.codigosUrl} target="_blank" rel="noopener noreferrer" className="account-link">Abrir web de códigos ↗</a>}{a.nota && <p className="account-note">{a.nota}</p>}</div><span className={`pill ${accountStatus(a.venceEl).className}`}>{accountStatus(a.venceEl).text}</span><button className="secondary" onClick={() => editAccount(a)}>Editar</button><button className="secondary" onClick={() => reveal(a.id)}>{revealed?.accountId === a.id ? <EyeOff size={16} /> : <Eye size={16} />}{revealed?.accountId === a.id ? 'Ocultar en 20 s' : 'Revelar'}</button>{revealed?.accountId === a.id && <p className="revealed">Contraseña: <strong>{revealed.password}</strong>{revealed.codePassword && <> · Contraseña web de códigos: <strong>{revealed.codePassword}</strong></>}</p>}</div>)}</div></details>)}
             {!accounts.length && !loading && <p className="empty">No hay cuentas cargadas.</p>}</div></section>}
+        {view === 'ajustes' && <div className="settings-grid"><section className="panel"><div className="panel-head"><div><h2>Preferencias y proveedor</h2><p>Valores migrados desde la hoja Configuración.</p></div></div>
+          <form className="form" onSubmit={saveSettings}><Field label="Moneda de los importes migrados"><input value={settingsDraft.moneda} readOnly aria-describedby="currency-note" /></Field><p id="currency-note" className="form-note">Los importes están guardados en soles. Cambiar la etiqueta no convertiría las cifras.</p>
+            <Field label="Prefijo de país por defecto"><input required pattern="\+\d{1,4}" maxLength="5" value={settingsDraft.prefijoDefecto} onChange={(event) => setSettingsDraft({ ...settingsDraft, prefijoDefecto: event.target.value })} /></Field>
+            <Field label="Nombre o empresa del proveedor"><input maxLength="150" value={settingsDraft.proveedorNombre} onChange={(event) => setSettingsDraft({ ...settingsDraft, proveedorNombre: event.target.value })} /></Field>
+            <Field label="Teléfono de soporte"><input maxLength="50" value={settingsDraft.proveedorTelefono} onChange={(event) => setSettingsDraft({ ...settingsDraft, proveedorTelefono: event.target.value })} /></Field>
+            <h3>Condiciones por plataforma</h3><p className="form-note">Condiciones migradas del sistema anterior; el mensaje de entrega aún está pendiente.</p>
+            {platforms.map((platform) => <details className="settings-condition" key={platform.id}><summary>{platform.nombre}</summary><Field label={`Condiciones de ${platform.nombre}`}><textarea rows="5" maxLength="4000" value={settingsDraft.condiciones?.[platform.nombre] || ''} onChange={(event) => setSettingsDraft({ ...settingsDraft, condiciones: { ...settingsDraft.condiciones, [platform.nombre]: event.target.value } })} /></Field></details>)}
+            <button className="primary submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar ajustes'}</button></form></section>
+          <section className="panel settings-side"><div className="panel-head"><div><h2>Plataformas</h2><p>{platforms.length} plataformas disponibles para cuentas y clientes.</p></div></div><form className="form" onSubmit={createPlatform}><Field label="Añadir plataforma"><input required maxLength="80" placeholder="Ej. Vix" value={newPlatformName} onChange={(event) => setNewPlatformName(event.target.value)} /></Field><button className="secondary" disabled={busy}>Añadir plataforma</button></form></section></div>}
       </main>
     </div>
     <nav className="mobile-nav" aria-label="Navegación móvil">{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>

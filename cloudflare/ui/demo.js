@@ -11,6 +11,8 @@ const platforms = [
   { id: 'disney', nombre: 'Disney+' },
   { id: 'max', nombre: 'Max' },
 ];
+const settings = { moneda: 'S/.', prefijoDefecto: '+51', proveedorNombre: 'Proveedor de ejemplo',
+  proveedorTelefono: '+51 900 000 000', condiciones: { Netflix: 'Usar solo el perfil asignado.' } };
 
 const accounts = [
   { id: 'cuenta-1', plataformaId: 'netflix', plataforma: 'Netflix', identificador: 'n***@ejemplo.test', perfilesAsignados: 2, password: 'CLAVE-DEMO-1', fechaCompra: date(-22), venceEl: date(8), codigosUrl: 'https://example.com/', codigoPassword: 'CODIGO-DEMO', nota: 'Cuenta de ejemplo' },
@@ -65,7 +67,20 @@ export async function demoApi(path, options = {}) {
       suscripciones: clients.filter((client) => client.plataformaId === platform.id).length,
     })).sort((a, b) => b.suscripciones - a.suscripciones),
   };
-  if (url.pathname === '/plataformas') return { items: clone(platforms) };
+  if (url.pathname === '/plataformas' && method === 'GET') return { items: clone(platforms) };
+  if (url.pathname === '/configuracion' && method === 'GET') return clone(settings);
+  if (url.pathname === '/configuracion' && method === 'PATCH') {
+    const body = JSON.parse(options.body);
+    for (const key of ['prefijoDefecto', 'proveedorNombre', 'proveedorTelefono', 'condiciones']) settings[key] = body[key];
+    return { ok: true };
+  }
+  if (url.pathname === '/plataformas' && method === 'POST') {
+    const name = JSON.parse(options.body).nombre.trim();
+    if (platforms.some((platform) => platform.nombre.toLowerCase() === name.toLowerCase())) throw new Error('La plataforma ya existe');
+    const platform = { id: crypto.randomUUID(), nombre: name };
+    platforms.push(platform);
+    return clone(platform);
+  }
   if (url.pathname === '/proximos') return { items: clone(clients.filter((c) => c.venceEl >= date(0))
     .sort((a, b) => a.venceEl.localeCompare(b.venceEl)).slice(0, 6)) };
   if (url.pathname === '/cuentas' && method === 'GET') {

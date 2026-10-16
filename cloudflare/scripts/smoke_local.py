@@ -3,6 +3,7 @@ import http.cookiejar
 import json
 from pathlib import Path
 import urllib.request
+import uuid
 
 BASE = 'http://127.0.0.1:8788'
 private = Path(__file__).resolve().parents[1] / '.migration'
@@ -44,4 +45,14 @@ call(f'/api/cuentas/{account_id}', 'PATCH', {
 updated = next(item for item in call('/api/cuentas')['items'] if item['id'] == account_id)
 assert updated['venceEl'] == '2026-12-16' and updated['nota'] == 'Nota actualizada'
 assert call(f'/api/cuentas/{account_id}/revelar', 'POST')['codigoPassword'] == 'codigo actualizado'
-print('Local account create, edit and encrypted password reveal: OK')
+platform_name = f'Prueba {uuid.uuid4().hex[:8]}'
+new_platform = call('/api/plataformas', 'POST', {'nombre': platform_name})
+assert new_platform['nombre'] == platform_name
+config = call('/api/configuracion')
+updated_config = {**config, 'proveedorNombre': 'Proveedor de prueba',
+    'condiciones': {**config['condiciones'], platform_name: 'Condición de prueba'}}
+assert call('/api/configuracion', 'PATCH', updated_config)['ok']
+saved_config = call('/api/configuracion')
+assert saved_config['proveedorNombre'] == 'Proveedor de prueba'
+assert saved_config['condiciones'][platform_name] == 'Condición de prueba'
+print('Local account, platform and settings API: OK')
