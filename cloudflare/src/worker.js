@@ -46,12 +46,13 @@ async function summary(env) {
   const nextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
   const [clients, subscriptions, movementsMonth, legacyMonth, historical] = await env.DB.batch([
-    env.DB.prepare('SELECT COUNT(*) AS total FROM clientes'),
+    env.DB.prepare('SELECT COUNT(*) AS total FROM clientes WHERE archivado_en IS NULL'),
     env.DB.prepare(`SELECT
       SUM(CASE WHEN estado = 'activa' AND vence_el >= ? THEN 1 ELSE 0 END) AS activas,
       SUM(CASE WHEN estado = 'activa' AND vence_el BETWEEN ? AND ? THEN 1 ELSE 0 END) AS proximas,
       SUM(CASE WHEN estado = 'activa' AND vence_el < ? THEN 1 ELSE 0 END) AS vencidas
-      FROM suscripciones`).bind(today, today, week, today),
+      FROM suscripciones s JOIN clientes c ON c.id = s.cliente_id
+      WHERE c.archivado_en IS NULL`).bind(today, today, week, today),
     env.DB.prepare(`SELECT COALESCE(SUM(ingresos_centimos - costos_centimos), 0) AS margen_centimos
       FROM movimientos WHERE fecha_cobro >= ? AND fecha_cobro < ?`).bind(monthStart, nextMonth),
     env.DB.prepare(`SELECT COUNT(*) AS ventas, COALESCE(SUM(precio_venta_centimos - precio_compra_centimos), 0) AS margen_centimos,
@@ -166,14 +167,16 @@ async function listClients(url, env) {
   const rawLimit = Number.parseInt(url.searchParams.get('limite') || '25', 10) || 25;
   const limit = Math.max(1, Math.min(50, rawLimit));
   const search = (url.searchParams.get('buscar') || '').trim().slice(0, 80);
+  const archived = url.searchParams.get('archivados') === '1';
   const needle = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
-  const condition = search ? `WHERE c.nombre LIKE ? ESCAPE '\\' OR c.telefono LIKE ? ESCAPE '\\'` : '';
+  const condition = `WHERE c.archivado_en IS ${archived ? 'NOT ' : ''}NULL`
+    + (search ? ` AND (c.nombre LIKE ? ESCAPE '\\' OR c.telefono LIKE ? ESCAPE '\\')` : '');
   const params = search ? [needle, needle] : [];
   const base = `FROM clientes c LEFT JOIN suscripciones s ON s.id = (
     SELECT id FROM suscripciones WHERE cliente_id = c.id ORDER BY vence_el DESC, id DESC LIMIT 1
   ) LEFT JOIN plataformas p ON p.id = s.plataforma_id ${condition}`;
   const [rows, count] = await env.DB.batch([
-    env.DB.prepare(`SELECT c.id, c.nombre, c.prefijo, c.telefono, s.id AS suscripcionId,
+    env.DB.prepare(`SELECT c.id, c.nombre, c.prefijo, c.telefono, c.archivado_en AS archivadoEn, s.id AS suscripcionId,
       s.vence_el AS venceEl, s.estado, s.version, s.legacy_cuenta AS cuentaOriginal, p.nombre AS plataforma
       ${base} ORDER BY s.vence_el ASC, c.nombre COLLATE NOCASE ASC LIMIT ? OFFSET ?`)
       .bind(...params, limit, (page - 1) * limit),
@@ -187,13 +190,13 @@ async function upcomingClients(env) {
     s.vence_el AS venceEl, s.estado, p.nombre AS plataforma
     FROM suscripciones s JOIN clientes c ON c.id = s.cliente_id
     JOIN plataformas p ON p.id = s.plataforma_id
-    WHERE s.estado = 'activa' AND s.vence_el >= ?
+    WHERE s.estado = 'activa' AND c.archivado_en IS NULL AND s.vence_el >= ?
     ORDER BY s.vence_el ASC, c.nombre COLLATE NOCASE ASC LIMIT 6`).bind(limaToday()).all();
   return json({ items: result.results });
 }
 
 async function getClient(id, env) {
-  const client = await env.DB.prepare('SELECT id, nombre, prefijo, telefono FROM clientes WHERE id = ?')
+  const client = await env.DB.prepare('SELECT id, nombre, prefijo, telefono, archivado_en AS archivadoEn FROM clientes WHERE id = ?')
     .bind(id).first();
   if (!client) return error('Cliente no encontrado', 404);
   const subscriptions = await env.DB.prepare(`SELECT s.id, s.plataforma_id AS plataformaId,
@@ -215,6 +218,78 @@ async function getClient(id, env) {
   return json({ ...client, suscripciones: subscriptions.results, movimientos: movements.results });
 }
 
+async function editClient(request, env, actor, clientId) {
+  const body = await bodyOf(request);
+  if (!body || !textField(body.nombre, 150) || !/^\+\d{1,4}$/.test(body.prefijo)
+    || !textField(body.suscripcionId, 100) || !textField(body.plataformaId, 100)
+    || !Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 0
+    || !validDate(body.venceEl) || (body.fechaInicio && !validDate(body.fechaInicio))
+    || (body.cuentaId != null && (typeof body.cuentaId !== 'string' || body.cuentaId.length > 100))
+    || (body.quitarPin != null && typeof body.quitarPin !== 'boolean')
+    || (body.perfil != null && (typeof body.perfil !== 'string' || body.perfil.length > 100))
+    || (body.pin != null && (typeof body.pin !== 'string' || (body.pin && !/^\d{1,50}$/.test(body.pin))))
+    || (body.quitarPin && body.pin)) return error('Datos de cliente inválidos');
+  const phone = cleanPhone(body.telefono);
+  if (body.telefono && !phone) return error('Teléfono inválido');
+  const current = await env.DB.prepare(`SELECT c.nombre, c.prefijo, c.telefono, c.archivado_en,
+    s.id AS suscripcion_id, s.version, s.plataforma_id, s.cuenta_id, s.perfil,
+    s.fecha_inicio, s.vence_el, s.pin_ciphertext, s.pin_nonce, s.pin_clave_version
+    FROM clientes c JOIN suscripciones s ON s.cliente_id = c.id
+    WHERE c.id = ? AND s.id = ?`).bind(clientId, body.suscripcionId).first();
+  if (!current) return error('Cliente o suscripción no encontrados', 404);
+  if (current.archivado_en) return error('Restaura el cliente antes de editar', 409);
+  if (current.version !== body.expectedVersion) return error('La suscripción cambió; actualiza la vista', 409);
+  const platform = await env.DB.prepare('SELECT id FROM plataformas WHERE id = ?').bind(body.plataformaId).first();
+  if (!platform) return error('Plataforma no encontrada', 404);
+  if (body.cuentaId) {
+    const account = await env.DB.prepare('SELECT plataforma_id, estado FROM cuentas_servicio WHERE id = ?').bind(body.cuentaId).first();
+    if (!account || account.plataforma_id !== body.plataformaId || account.estado !== 'activa') return error('Cuenta incompatible o retirada', 409);
+  }
+  const secret = body.pin ? await encryptSecret(body.pin, env) : null;
+  const clearPin = body.quitarPin === true;
+  const prior = { nombre: current.nombre, prefijo: current.prefijo, telefono: current.telefono,
+    plataformaId: current.plataforma_id, cuentaId: current.cuenta_id, perfil: current.perfil,
+    fechaInicio: current.fecha_inicio, venceEl: current.vence_el };
+  const next = { nombre: body.nombre.trim(), prefijo: body.prefijo, telefono: phone,
+    plataformaId: body.plataformaId, cuentaId: body.cuentaId || null,
+    perfil: body.perfil?.trim() || null, fechaInicio: body.fechaInicio || null, venceEl: body.venceEl };
+  const detail = JSON.stringify({ suscripcionId: body.suscripcionId, expectedVersion: body.expectedVersion,
+    anterior: prior, nuevo: next, pinModificado: !!secret || clearPin });
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO auditoria (id, actor_subject, accion, objeto_tipo, objeto_id, detalle_json)
+        VALUES (?, ?, 'editar_cliente', 'cliente', ?, ?)`).bind(uuid(), actor.access_subject, clientId, detail),
+      env.DB.prepare(`UPDATE clientes SET nombre = ?, prefijo = ?, telefono = ?, actualizado_en = datetime('now') WHERE id = ?`)
+        .bind(next.nombre, next.prefijo, next.telefono, clientId),
+      env.DB.prepare(`UPDATE suscripciones SET plataforma_id = ?, cuenta_id = ?, perfil = ?,
+        fecha_inicio = ?, vence_el = ?, pin_ciphertext = ?, pin_nonce = ?, pin_clave_version = ?,
+        version = version + 1 WHERE id = ? AND version = ?`).bind(
+        next.plataformaId, next.cuentaId, next.perfil, next.fechaInicio, next.venceEl,
+        secret?.ciphertext || (clearPin ? null : current.pin_ciphertext),
+        secret?.nonce || (clearPin ? null : current.pin_nonce),
+        secret?.keyVersion || (clearPin ? null : current.pin_clave_version),
+        body.suscripcionId, body.expectedVersion),
+    ]);
+    return json({ id: clientId, version: body.expectedVersion + 1 });
+  } catch {
+    return error('La suscripción cambió o no se pudo guardar; actualiza la vista', 409);
+  }
+}
+
+async function setClientArchived(env, actor, clientId, archived) {
+  const existing = await env.DB.prepare('SELECT archivado_en FROM clientes WHERE id = ?').bind(clientId).first();
+  if (!existing) return error('Cliente no encontrado', 404);
+  if (Boolean(existing.archivado_en) === archived) return json({ id: clientId, sinCambios: true });
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE clientes SET archivado_en = ${archived ? "datetime('now')" : 'NULL'},
+      actualizado_en = datetime('now') WHERE id = ?`).bind(clientId),
+    env.DB.prepare(`INSERT INTO auditoria (id, actor_subject, accion, objeto_tipo, objeto_id)
+      VALUES (?, ?, ?, 'cliente', ?)`).bind(uuid(), actor.access_subject,
+      archived ? 'retirar_cliente' : 'restaurar_cliente', clientId),
+  ]);
+  return json({ id: clientId, archivado: archived });
+}
+
 async function createClient(request, env, actor) {
   const body = await bodyOf(request);
   if (!body || !textField(body.nombre, 150) || !textField(body.plataformaId, 100)
@@ -229,9 +304,9 @@ async function createClient(request, env, actor) {
   const platform = await env.DB.prepare('SELECT id FROM plataformas WHERE id = ?').bind(body.plataformaId).first();
   if (!platform) return error('Plataforma no encontrada');
   if (body.cuentaId) {
-    const account = await env.DB.prepare('SELECT plataforma_id FROM cuentas_servicio WHERE id = ?')
+    const account = await env.DB.prepare('SELECT plataforma_id, estado FROM cuentas_servicio WHERE id = ?')
       .bind(body.cuentaId).first();
-    if (!account || account.plataforma_id !== body.plataformaId) return error('Cuenta incompatible');
+    if (!account || account.plataforma_id !== body.plataformaId || account.estado !== 'activa') return error('Cuenta incompatible o retirada');
   }
   const clientId = uuid();
   const subscriptionId = uuid();
@@ -298,9 +373,11 @@ async function renew(request, env, actor, subscriptionId) {
       ? json({ id: existing.id, repetida: true })
       : error('Clave de operación reutilizada con otros datos', 409);
   }
-  const current = await env.DB.prepare('SELECT version, vence_el, estado FROM suscripciones WHERE id = ?')
+  const current = await env.DB.prepare(`SELECT s.version, s.vence_el, s.estado, c.archivado_en AS archivado_en
+    FROM suscripciones s JOIN clientes c ON c.id = s.cliente_id WHERE s.id = ?`)
     .bind(subscriptionId).first();
   if (!current) return error('Suscripción no encontrada', 404);
+  if (current.archivado_en) return error('Restaura el cliente antes de renovar', 409);
   if (current.estado !== 'activa') return error('Suscripción no activa', 409);
   if (current.version !== body.expectedVersion) return error('La suscripción cambió; actualiza la vista', 409);
   const movementId = uuid();
@@ -431,6 +508,84 @@ async function revealAccount(accountId, env, actor) {
   }
 }
 
+async function setAccountRetired(env, actor, accountId, retired) {
+  const existing = await env.DB.prepare('SELECT estado FROM cuentas_servicio WHERE id = ?').bind(accountId).first();
+  if (!existing) return error('Cuenta no encontrada', 404);
+  if ((existing.estado === 'retirada') === retired) return json({ id: accountId, sinCambios: true });
+  if (retired) {
+    const assigned = await env.DB.prepare('SELECT COUNT(*) AS total FROM suscripciones WHERE cuenta_id = ?')
+      .bind(accountId).first();
+    if (assigned.total) return error(`Desasigna primero los ${assigned.total} perfiles de esta cuenta`, 409);
+  }
+  try {
+    await env.DB.batch([
+      env.DB.prepare('UPDATE cuentas_servicio SET estado = ? WHERE id = ?').bind(retired ? 'retirada' : 'activa', accountId),
+      env.DB.prepare(`INSERT INTO auditoria (id, actor_subject, accion, objeto_tipo, objeto_id)
+        VALUES (?, ?, ?, 'cuenta', ?)`).bind(uuid(), actor.access_subject,
+        retired ? 'retirar_cuenta' : 'restaurar_cuenta', accountId),
+    ]);
+    return json({ id: accountId, retirada: retired });
+  } catch {
+    return error('No se pudo cambiar el estado de la cuenta', 409);
+  }
+}
+
+async function prepareDelivery(env, actor, subscriptionId) {
+  const record = await env.DB.prepare(`SELECT c.id AS cliente_id, c.nombre, c.prefijo, c.telefono,
+    c.archivado_en, s.id AS suscripcion_id, s.estado AS suscripcion_estado,
+    s.perfil, s.fecha_inicio, s.vence_el,
+    p.nombre AS plataforma, a.id AS cuenta_id, a.identificador, a.estado AS cuenta_estado,
+    a.codigos_url, x.ciphertext, x.nonce, x.codigo_password_ciphertext, x.codigo_password_nonce,
+    s.pin_ciphertext, s.pin_nonce
+    FROM suscripciones s JOIN clientes c ON c.id = s.cliente_id
+    JOIN plataformas p ON p.id = s.plataforma_id
+    LEFT JOIN cuentas_servicio a ON a.id = s.cuenta_id
+    LEFT JOIN secretos_cuenta x ON x.cuenta_id = a.id
+    WHERE s.id = ?`).bind(subscriptionId).first();
+  if (!record) return error('Suscripción no encontrada', 404);
+  if (record.archivado_en) return error('Restaura el cliente antes de preparar el mensaje', 409);
+  if (record.suscripcion_estado !== 'activa') return error('La suscripción no está activa', 409);
+  if (!record.cuenta_id || record.cuenta_estado !== 'activa' || !record.ciphertext) {
+    return error('Vincula una cuenta activa antes de enviar credenciales', 409);
+  }
+  const phone = `${record.prefijo || '+51'}${record.telefono || ''}`.replace(/\D/g, '');
+  if (phone.length < 8 || phone.length > 20) return error('El cliente necesita un teléfono válido', 409);
+  let password;
+  let pin;
+  let codePassword;
+  try {
+    password = await decryptSecret(record.ciphertext, record.nonce, env);
+    pin = record.pin_ciphertext ? await decryptSecret(record.pin_ciphertext, record.pin_nonce, env) : null;
+    codePassword = record.codigo_password_ciphertext
+      ? await decryptSecret(record.codigo_password_ciphertext, record.codigo_password_nonce, env) : null;
+  } catch { return error('No se pudieron leer las credenciales', 500); }
+  const configRows = await env.DB.prepare(`SELECT clave, valor FROM configuracion
+    WHERE clave IN ('condiciones_plataformas', 'proveedor_nombre', 'proveedor_telefono')`).all();
+  const config = Object.fromEntries(configRows.results.map((row) => [row.clave, row.valor]));
+  let conditions = {};
+  try { conditions = JSON.parse(config.condiciones_plataformas || '{}'); } catch { /* Mensaje sin condiciones. */ }
+  const days = Math.round((Date.parse(`${record.vence_el}T00:00:00Z`) - Date.parse(`${limaToday()}T00:00:00Z`)) / 86_400_000);
+  const remaining = days >= 0 ? `${days} días restantes` : `vencido hace ${-days} días`;
+  const lines = [`*${record.plataforma}* 📌`, `Correo: ${record.identificador}`,
+    `Contraseña: ${password}`, `Perfil/usuario: ${record.perfil || record.nombre}`];
+  if (pin) lines.push(`PIN: ${pin}`);
+  lines.push(`⏳ Contratado: ${remaining}`, `🗓 Compra: ${record.fecha_inicio || 'Sin fecha'}`,
+    `🗓 Vencimiento: ${record.vence_el}`);
+  if (record.codigos_url) lines.push(`Web de códigos: ${record.codigos_url}`);
+  if (codePassword) lines.push(`Contraseña web de códigos: ${codePassword}`);
+  if (conditions && typeof conditions[record.plataforma] === 'string' && conditions[record.plataforma].trim()) {
+    lines.push('', `⚠️ *Condiciones de uso:*`, conditions[record.plataforma].trim());
+  }
+  if (config.proveedor_nombre) lines.push('', `👤 Proveedor: ${config.proveedor_nombre}`);
+  if (config.proveedor_telefono) lines.push(`📞 Teléfono: ${config.proveedor_telefono}`);
+  lines.push('', '¡Muchas gracias por tu compra!');
+  await env.DB.prepare(`INSERT INTO auditoria (id, actor_subject, accion, objeto_tipo, objeto_id, detalle_json)
+    VALUES (?, ?, 'preparar_mensaje_entrega', 'suscripcion', ?, ?)`)
+    .bind(uuid(), actor.access_subject, subscriptionId,
+      JSON.stringify({ clienteId: record.cliente_id, cuentaId: record.cuenta_id })).run();
+  return json({ telefono: phone, mensaje: lines.join('\n') });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -456,6 +611,15 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/clientes') return listClients(url, env);
       const client = url.pathname.match(/^\/api\/clientes\/([^/]+)$/);
       if (request.method === 'GET' && client) return getClient(client[1], env);
+      if (request.method === 'PATCH' && client) {
+        return mayManageAccounts(actor) ? editClient(request, env, actor, client[1]) : error('Sin permiso', 403);
+      }
+      const clientLifecycle = url.pathname.match(/^\/api\/clientes\/([^/]+)\/(archivar|restaurar)$/);
+      if (request.method === 'POST' && clientLifecycle) {
+        return mayManageAccounts(actor)
+          ? setClientArchived(env, actor, clientLifecycle[1], clientLifecycle[2] === 'archivar')
+          : error('Sin permiso', 403);
+      }
       if (request.method === 'POST' && url.pathname === '/api/clientes') return createClient(request, env, actor);
       if (request.method === 'GET' && url.pathname === '/api/plataformas') {
         const result = await env.DB.prepare('SELECT id, nombre FROM plataformas ORDER BY nombre').all();
@@ -472,12 +636,22 @@ export default {
       if (request.method === 'PATCH' && account) {
         return mayManageAccounts(actor) ? updateAccount(request, env, account[1]) : error('Sin permiso', 403);
       }
+      const accountLifecycle = url.pathname.match(/^\/api\/cuentas\/([^/]+)\/(retirar|restaurar)$/);
+      if (request.method === 'POST' && accountLifecycle) {
+        return mayManageAccounts(actor)
+          ? setAccountRetired(env, actor, accountLifecycle[1], accountLifecycle[2] === 'retirar')
+          : error('Sin permiso', 403);
+      }
       const reveal = url.pathname.match(/^\/api\/cuentas\/([^/]+)\/revelar$/);
       if (request.method === 'POST' && reveal) {
         return mayManageAccounts(actor) ? revealAccount(reveal[1], env, actor) : error('Sin permiso', 403);
       }
       const renewal = url.pathname.match(/^\/api\/suscripciones\/([^/]+)\/renovaciones$/);
       if (request.method === 'POST' && renewal) return renew(request, env, actor, renewal[1]);
+      const delivery = url.pathname.match(/^\/api\/suscripciones\/([^/]+)\/entrega$/);
+      if (request.method === 'POST' && delivery) {
+        return mayManageAccounts(actor) ? prepareDelivery(env, actor, delivery[1]) : error('Sin permiso', 403);
+      }
       return error('Ruta no encontrada', 404);
     } catch {
       return error('Error interno', 500);

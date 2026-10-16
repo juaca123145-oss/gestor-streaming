@@ -15,17 +15,17 @@ const settings = { moneda: 'S/.', prefijoDefecto: '+51', proveedorNombre: 'Prove
   proveedorTelefono: '+51 900 000 000', condiciones: { Netflix: 'Usar solo el perfil asignado.' } };
 
 const accounts = [
-  { id: 'cuenta-1', plataformaId: 'netflix', plataforma: 'Netflix', identificador: 'n***@ejemplo.test', perfilesAsignados: 2, password: 'CLAVE-DEMO-1', fechaCompra: date(-22), venceEl: date(8), codigosUrl: 'https://example.com/', codigoPassword: 'CODIGO-DEMO', nota: 'Cuenta de ejemplo' },
-  { id: 'cuenta-2', plataformaId: 'spotify', plataforma: 'Spotify', identificador: 's***@ejemplo.test', perfilesAsignados: 1, password: 'CLAVE-DEMO-2', fechaCompra: date(-30), venceEl: date(0), codigosUrl: null, codigoPassword: null, nota: null },
-  { id: 'cuenta-3', plataformaId: 'disney', plataforma: 'Disney+', identificador: 'd***@ejemplo.test', perfilesAsignados: 1, password: 'CLAVE-DEMO-3', fechaCompra: null, venceEl: null, codigosUrl: null, codigoPassword: null, nota: null },
+  { id: 'cuenta-1', plataformaId: 'netflix', plataforma: 'Netflix', identificador: 'n***@ejemplo.test', estado: 'activa', perfilesAsignados: 2, password: 'CLAVE-DEMO-1', fechaCompra: date(-22), venceEl: date(8), codigosUrl: 'https://example.com/', codigoPassword: 'CODIGO-DEMO', nota: 'Cuenta de ejemplo' },
+  { id: 'cuenta-2', plataformaId: 'spotify', plataforma: 'Spotify', identificador: 's***@ejemplo.test', estado: 'activa', perfilesAsignados: 1, password: 'CLAVE-DEMO-2', fechaCompra: date(-30), venceEl: date(0), codigosUrl: null, codigoPassword: null, nota: null },
+  { id: 'cuenta-3', plataformaId: 'disney', plataforma: 'Disney+', identificador: 'd***@ejemplo.test', estado: 'activa', perfilesAsignados: 1, password: 'CLAVE-DEMO-3', fechaCompra: null, venceEl: null, codigosUrl: null, codigoPassword: null, nota: null },
 ];
 
 const clients = [
-  { id: 'demo-1', nombre: 'Ana Morales', prefijo: '+51', telefono: '900000001', plataformaId: 'netflix', plataforma: 'Netflix', cuentaId: 'cuenta-1', cuentaOriginal: 'ana@ejemplo.test', venceEl: date(0), estado: 'activa', version: 1, suscripcionId: 'sub-1', perfil: 'Principal' },
-  { id: 'demo-2', nombre: 'Carlos Rojas', prefijo: '+51', telefono: '900000002', plataformaId: 'spotify', plataforma: 'Spotify', cuentaId: 'cuenta-2', venceEl: date(1), estado: 'activa', version: 1, suscripcionId: 'sub-2', perfil: 'Individual' },
-  { id: 'demo-3', nombre: 'Lucía Vega', prefijo: '+51', telefono: '900000003', plataformaId: 'disney', plataforma: 'Disney+', cuentaId: 'cuenta-3', venceEl: date(3), estado: 'activa', version: 1, suscripcionId: 'sub-3', perfil: 'Perfil 2' },
-  { id: 'demo-4', nombre: 'Jorge Pérez', prefijo: '+51', telefono: '900000004', plataformaId: 'max', plataforma: 'Max', cuentaId: null, venceEl: date(-2), estado: 'activa', version: 1, suscripcionId: 'sub-4', perfil: 'Familiar' },
-  { id: 'demo-5', nombre: 'María Torres', prefijo: '+51', telefono: '900000005', plataformaId: 'netflix', plataforma: 'Netflix', cuentaId: 'cuenta-1', venceEl: date(20), estado: 'activa', version: 1, suscripcionId: 'sub-5', perfil: 'Perfil 3' },
+  { id: 'demo-1', nombre: 'Ana Morales', prefijo: '+51', telefono: '900000001', plataformaId: 'netflix', plataforma: 'Netflix', cuentaId: 'cuenta-1', cuentaOriginal: 'ana@ejemplo.test', fechaInicio: date(-30), venceEl: date(0), estado: 'activa', version: 1, suscripcionId: 'sub-1', perfil: 'Principal', archivadoEn: null },
+  { id: 'demo-2', nombre: 'Carlos Rojas', prefijo: '+51', telefono: '900000002', plataformaId: 'spotify', plataforma: 'Spotify', cuentaId: 'cuenta-2', fechaInicio: date(-29), venceEl: date(1), estado: 'activa', version: 1, suscripcionId: 'sub-2', perfil: 'Individual', archivadoEn: null },
+  { id: 'demo-3', nombre: 'Lucía Vega', prefijo: '+51', telefono: '900000003', plataformaId: 'disney', plataforma: 'Disney+', cuentaId: 'cuenta-3', fechaInicio: date(-27), venceEl: date(3), estado: 'activa', version: 1, suscripcionId: 'sub-3', perfil: 'Perfil 2', archivadoEn: null },
+  { id: 'demo-4', nombre: 'Jorge Pérez', prefijo: '+51', telefono: '900000004', plataformaId: 'max', plataforma: 'Max', cuentaId: null, fechaInicio: date(-32), venceEl: date(-2), estado: 'activa', version: 1, suscripcionId: 'sub-4', perfil: 'Familiar', archivadoEn: null },
+  { id: 'demo-5', nombre: 'María Torres', prefijo: '+51', telefono: '900000005', plataformaId: 'netflix', plataforma: 'Netflix', cuentaId: 'cuenta-1', fechaInicio: date(-10), venceEl: date(20), estado: 'activa', version: 1, suscripcionId: 'sub-5', perfil: 'Perfil 3', archivadoEn: null },
 ];
 
 const movements = [
@@ -42,10 +42,10 @@ export async function demoApi(path, options = {}) {
   if (url.pathname === '/resumen') {
     const current = date(0);
     const week = date(7);
-    return { clientes: clients.length,
-      activas: clients.filter((c) => c.venceEl >= current).length,
-      proximas: clients.filter((c) => c.venceEl >= current && c.venceEl <= week).length,
-      vencidas: clients.filter((c) => c.venceEl < current).length,
+    return { clientes: clients.filter((c) => !c.archivadoEn).length,
+      activas: clients.filter((c) => !c.archivadoEn && c.venceEl >= current).length,
+      proximas: clients.filter((c) => !c.archivadoEn && c.venceEl >= current && c.venceEl <= week).length,
+      vencidas: clients.filter((c) => !c.archivadoEn && c.venceEl < current).length,
       margenMesCentimos: movements.filter((m) => m.fechaCobro.slice(0, 7) === current.slice(0, 7))
         .reduce((sum, m) => sum + m.ingresosCentimos - m.costosCentimos, 0),
       margenExcelMesCentimos: 0,
@@ -81,7 +81,7 @@ export async function demoApi(path, options = {}) {
     platforms.push(platform);
     return clone(platform);
   }
-  if (url.pathname === '/proximos') return { items: clone(clients.filter((c) => c.venceEl >= date(0))
+  if (url.pathname === '/proximos') return { items: clone(clients.filter((c) => !c.archivadoEn && c.venceEl >= date(0))
     .sort((a, b) => a.venceEl.localeCompare(b.venceEl)).slice(0, 6)) };
   if (url.pathname === '/cuentas' && method === 'GET') {
     return { items: accounts.map(({ password: _password, codigoPassword: _codigoPassword, ...account }) => ({ ...account })) };
@@ -92,7 +92,7 @@ export async function demoApi(path, options = {}) {
     if (!platform) throw new Error('Selecciona una plataforma.');
     const id = crypto.randomUUID();
     accounts.push({ id, plataformaId: platform.id, plataforma: platform.nombre,
-      identificador: `${body.identificador[0] || '*'}***`, perfilesAsignados: 0, password: body.contrasena,
+      identificador: `${body.identificador[0] || '*'}***`, estado: 'activa', perfilesAsignados: 0, password: body.contrasena,
       fechaCompra: body.fechaCompra, venceEl: body.venceEl, codigosUrl: body.codigosUrl,
       codigoPassword: body.codigoPassword, nota: body.nota });
     return { id };
@@ -113,11 +113,23 @@ export async function demoApi(path, options = {}) {
     if (!account) throw new Error('Cuenta no encontrada');
     return { contrasena: account.password, codigoPassword: account.codigoPassword };
   }
+  const accountLifecycle = url.pathname.match(/^\/cuentas\/([^/]+)\/(retirar|restaurar)$/);
+  if (accountLifecycle && method === 'POST') {
+    const account = accounts.find((item) => item.id === accountLifecycle[1]);
+    if (!account) throw new Error('Cuenta no encontrada');
+    if (accountLifecycle[2] === 'retirar' && clients.some((item) => item.cuentaId === account.id)) {
+      throw new Error('Desasigna primero los perfiles de esta cuenta');
+    }
+    account.estado = accountLifecycle[2] === 'retirar' ? 'retirada' : 'activa';
+    return { id: account.id, retirada: account.estado === 'retirada' };
+  }
   if (url.pathname === '/clientes' && method === 'GET') {
     const search = (url.searchParams.get('buscar') || '').toLocaleLowerCase('es');
     const page = Number(url.searchParams.get('pagina') || 1);
     const limit = Number(url.searchParams.get('limite') || 25);
-    const found = clients.filter((c) => `${c.nombre} ${c.telefono}`.toLocaleLowerCase('es').includes(search))
+    const archived = url.searchParams.get('archivados') === '1';
+    const found = clients.filter((c) => Boolean(c.archivadoEn) === archived)
+      .filter((c) => `${c.nombre} ${c.telefono}`.toLocaleLowerCase('es').includes(search))
       .sort((a, b) => a.venceEl.localeCompare(b.venceEl));
     return { items: clone(found.slice((page - 1) * limit, page * limit)), total: found.length, pagina: page, limite: limit };
   }
@@ -129,7 +141,8 @@ export async function demoApi(path, options = {}) {
     const suscripcionId = crypto.randomUUID();
     clients.push({ id, suscripcionId, nombre: body.nombre, prefijo: body.prefijo,
       telefono: body.telefono, plataformaId: platform.id, plataforma: platform.nombre,
-      cuentaId: body.cuentaId, venceEl: body.venceEl, estado: 'activa', version: 1, perfil: body.perfil });
+      cuentaId: body.cuentaId, fechaInicio: body.fechaInicio, venceEl: body.venceEl,
+      estado: 'activa', version: 1, perfil: body.perfil, archivadoEn: null });
     movements.push({ id: crypto.randomUUID(), suscripcionId, tipo: 'alta', fechaCobro: body.fechaInicio,
       ingresosCentimos: body.ingresosCentimos, costosCentimos: body.costosCentimos, vencimientoNuevo: body.venceEl });
     return { id, suscripcionId };
@@ -138,11 +151,49 @@ export async function demoApi(path, options = {}) {
   if (client) {
     const value = clients.find((item) => item.id === client[1]);
     if (!value) throw new Error('Cliente no encontrado');
+    if (method === 'PATCH') {
+      if (value.archivadoEn) throw new Error('Restaura el cliente antes de editar');
+      const body = JSON.parse(options.body);
+      if (value.version !== body.expectedVersion) throw new Error('La suscripción cambió; actualiza la vista');
+      const platform = platforms.find((item) => item.id === body.plataformaId);
+      const account = accounts.find((item) => item.id === body.cuentaId);
+      if (!platform || (body.cuentaId && (!account || account.estado !== 'activa'
+        || account.plataformaId !== platform.id))) throw new Error('Cuenta incompatible o retirada');
+      Object.assign(value, { nombre: body.nombre, prefijo: body.prefijo, telefono: body.telefono,
+        plataformaId: platform.id, plataforma: platform.nombre, cuentaId: body.cuentaId || null,
+        perfil: body.perfil, fechaInicio: body.fechaInicio, venceEl: body.venceEl });
+      value.version += 1;
+      return { id: value.id, version: value.version };
+    }
     return { id: value.id, nombre: value.nombre, prefijo: value.prefijo, telefono: value.telefono,
+      archivadoEn: value.archivadoEn,
       suscripciones: [{ id: value.suscripcionId, plataformaId: value.plataformaId,
         plataforma: value.plataforma, cuentaId: value.cuentaId, cuentaOriginal: value.cuentaOriginal, perfil: value.perfil,
-        venceEl: value.venceEl, estado: value.estado, version: value.version }],
+        fechaInicio: value.fechaInicio, venceEl: value.venceEl, estado: value.estado, version: value.version }],
       movimientos: clone(movements.filter((m) => m.suscripcionId === value.suscripcionId)) };
+  }
+  const clientLifecycle = url.pathname.match(/^\/clientes\/([^/]+)\/(archivar|restaurar)$/);
+  if (clientLifecycle && method === 'POST') {
+    const value = clients.find((item) => item.id === clientLifecycle[1]);
+    if (!value) throw new Error('Cliente no encontrado');
+    value.archivadoEn = clientLifecycle[2] === 'archivar' ? new Date().toISOString() : null;
+    return { id: value.id, archivado: Boolean(value.archivadoEn) };
+  }
+  const delivery = url.pathname.match(/^\/suscripciones\/([^/]+)\/entrega$/);
+  if (delivery && method === 'POST') {
+    const value = clients.find((item) => item.suscripcionId === delivery[1]);
+    if (!value || value.archivadoEn) throw new Error('Suscripción no disponible');
+    const account = accounts.find((item) => item.id === value.cuentaId && item.estado === 'activa');
+    if (!account) throw new Error('Vincula una cuenta activa antes de enviar credenciales');
+    const lines = [`*${value.plataforma}* 📌`, `Correo: ${account.identificador}`,
+      `Contraseña: ${account.password}`, `Perfil/usuario: ${value.perfil || value.nombre}`,
+      `🗓 Compra: ${value.fechaInicio || 'Sin fecha'}`, `🗓 Vencimiento: ${value.venceEl}`];
+    if (account.codigosUrl) lines.push(`Web de códigos: ${account.codigosUrl}`);
+    if (account.codigoPassword) lines.push(`Contraseña web de códigos: ${account.codigoPassword}`);
+    if (settings.condiciones[value.plataforma]) lines.push('', '⚠️ *Condiciones de uso:*', settings.condiciones[value.plataforma]);
+    lines.push('', `👤 Proveedor: ${settings.proveedorNombre}`, `📞 Teléfono: ${settings.proveedorTelefono}`,
+      '', '¡Muchas gracias por tu compra!');
+    return { telefono: `${value.prefijo}${value.telefono}`.replace(/\D/g, ''), mensaje: lines.join('\n') };
   }
   const renew = url.pathname.match(/^\/suscripciones\/([^/]+)\/renovaciones$/);
   if (renew && method === 'POST') {

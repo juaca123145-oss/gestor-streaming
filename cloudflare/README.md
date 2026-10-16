@@ -20,11 +20,14 @@ La nueva PWA se sirve desde un Cloudflare Worker con D1. El despliegue está en 
 - «Histórico verificado» suma los saldos del Excel marcados como verificados y los movimientos nuevos. Los 62 saldos pendientes quedan fuera de esa cifra hasta conciliarlos; no se convierten en cero.
 - El resumen incluye gráficas de ganancia mensual (12 meses) y suscripciones por plataforma. La barra del mes actual usa el mismo cálculo que «Ganancia del mes». Las cifras de las gráficas se obtienen de `/api/estadisticas`, sin enviar contraseñas ni datos personales.
 - El botón «Avisar» del directorio y «Enviar renovación» del detalle abren WhatsApp con el recordatorio preescrito. No envían el mensaje automáticamente. Si falta un teléfono válido, el enlace queda deshabilitado.
+- «Editar datos» permite corregir contacto, plataforma, cuenta, perfil, PIN y fechas. Exige la versión actual de la suscripción y registra un resumen del cambio en auditoría; los importes y movimientos históricos permanecen intactos.
+- Clientes y cuentas pueden retirarse y restaurarse. Los clientes retirados se separan del directorio activo y los indicadores operativos. Una cuenta asignada no se puede retirar hasta desasignar sus perfiles. Las filas, cobros y auditoría se conservan.
+- «Entregar acceso» prepara un mensaje con credenciales, fechas, web de códigos, condiciones y proveedor. El administrador ve el contenido antes de abrir WhatsApp; la vista previa se cierra a los dos minutos. La preparación se audita sin guardar el texto ni las contraseñas en la auditoría.
 - «Ajustes» recupera las condiciones por plataforma, datos del proveedor y prefijo predeterminado que guardaba Apps Script. Permite añadir plataformas. La moneda importada se muestra sin permitir cambiar sólo su etiqueta, porque los importes guardados están en soles.
 
 ## Comparación con Apps Script
 
-El Apps Script original exponía lectura de clientes, cuentas y configuración, guardado o actualización de filas completas y borrado físico de clientes y cuentas. Las estadísticas, mensajes de WhatsApp y formularios estaban implementados en la antigua interfaz React, no en el Apps Script. En la nueva app siguen pendientes la edición de clientes, la retirada de registros con conservación del historial y el mensaje de entrega de credenciales y condiciones. El borrado físico de una fila no se replica porque eliminaría referencias financieras y de auditoría.
+El Apps Script original exponía lectura de clientes, cuentas y configuración, guardado o actualización de filas completas y borrado físico de clientes y cuentas. Las estadísticas, mensajes de WhatsApp y formularios estaban implementados en la antigua interfaz React. La nueva app ofrece edición de clientes, retirada reversible y mensajes de entrega. El borrado físico de una fila se sustituyó por la retirada reversible para conservar referencias financieras y de auditoría.
 
 ## Desarrollo
 

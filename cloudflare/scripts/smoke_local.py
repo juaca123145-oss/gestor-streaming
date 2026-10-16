@@ -3,6 +3,7 @@ import http.cookiejar
 import json
 from pathlib import Path
 import urllib.request
+import urllib.error
 import uuid
 
 BASE = 'http://127.0.0.1:8788'
@@ -55,4 +56,54 @@ assert call('/api/configuracion', 'PATCH', updated_config)['ok']
 saved_config = call('/api/configuracion')
 assert saved_config['proveedorNombre'] == 'Proveedor de prueba'
 assert saved_config['condiciones'][platform_name] == 'Condición de prueba'
-print('Local account, platform and settings API: OK')
+new_client = call('/api/clientes', 'POST', {
+    'nombre': 'Cliente de prueba', 'prefijo': '+51', 'telefono': '900000001',
+    'plataformaId': 'test-platform', 'cuentaId': account_id, 'perfil': 'Principal',
+    'pin': '1234', 'fechaInicio': '2026-10-16', 'venceEl': '2026-11-16',
+    'ingresosCentimos': 2000, 'costosCentimos': 1000,
+})
+client_id, subscription_id = new_client['id'], new_client['suscripcionId']
+detail = call(f'/api/clientes/{client_id}')
+assert detail['suscripciones'][0]['version'] == 1
+delivery = call(f'/api/suscripciones/{subscription_id}/entrega', 'POST')
+assert 'clave de prueba' in delivery['mensaje'] and 'PIN: 1234' in delivery['mensaje']
+assert 'Condición' not in delivery['mensaje']
+edited = call(f'/api/clientes/{client_id}', 'PATCH', {
+    'nombre': 'Cliente corregido', 'prefijo': '+51', 'telefono': '900000002',
+    'suscripcionId': subscription_id, 'expectedVersion': 1,
+    'plataformaId': 'test-platform', 'cuentaId': account_id, 'perfil': 'Secundario',
+    'pin': '5678', 'fechaInicio': '2026-10-17', 'venceEl': '2026-12-17',
+})
+assert edited['version'] == 2
+detail = call(f'/api/clientes/{client_id}')
+assert detail['nombre'] == 'Cliente corregido'
+assert detail['suscripciones'][0]['venceEl'] == '2026-12-17'
+assert 'PIN: 5678' in call(f'/api/suscripciones/{subscription_id}/entrega', 'POST')['mensaje']
+try:
+    call(f'/api/clientes/{client_id}', 'PATCH', {
+        'nombre': 'Obsoleto', 'prefijo': '+51', 'telefono': '900000002',
+        'suscripcionId': subscription_id, 'expectedVersion': 1,
+        'plataformaId': 'test-platform', 'cuentaId': account_id,
+        'fechaInicio': '2026-10-17', 'venceEl': '2026-12-17',
+    })
+    raise AssertionError('Una versión obsoleta se aceptó')
+except urllib.error.HTTPError as exc:
+    assert exc.code == 409
+assert call(f'/api/clientes/{client_id}/archivar', 'POST')['archivado']
+assert any(item['id'] == client_id for item in call('/api/clientes?archivados=1')['items'])
+assert not any(item['id'] == client_id for item in call('/api/clientes')['items'])
+assert not call(f'/api/clientes/{client_id}/restaurar', 'POST')['archivado']
+try:
+    call(f'/api/cuentas/{account_id}/retirar', 'POST')
+    raise AssertionError('Se retiró una cuenta asignada')
+except urllib.error.HTTPError as exc:
+    assert exc.code == 409
+call(f'/api/clientes/{client_id}', 'PATCH', {
+    'nombre': 'Cliente corregido', 'prefijo': '+51', 'telefono': '900000002',
+    'suscripcionId': subscription_id, 'expectedVersion': 2,
+    'plataformaId': 'test-platform', 'cuentaId': None, 'perfil': 'Secundario',
+    'fechaInicio': '2026-10-17', 'venceEl': '2026-12-17',
+})
+assert call(f'/api/cuentas/{account_id}/retirar', 'POST')['retirada']
+assert not call(f'/api/cuentas/{account_id}/restaurar', 'POST')['retirada']
+print('Local lifecycle, delivery, account, platform and settings API: OK')

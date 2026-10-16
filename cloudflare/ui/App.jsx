@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard, Users, RefreshCw, KeyRound, Plus, Search, X,
-  ArrowRight, Eye, EyeOff, CalendarDays, AlertCircle, Wallet, MessageCircle, Settings,
+  ArrowRight, Eye, EyeOff, CalendarDays, AlertCircle, Wallet, MessageCircle, Settings, Archive, RotateCcw,
 } from 'lucide-react';
 import { demoApi } from './demo.js';
 
@@ -67,6 +67,7 @@ function accountStatus(date) {
 }
 
 function renewalWhatsAppUrl(client, subscription = client) {
+  if (client.archivadoEn) return null;
   const phone = `${client.prefijo || '+51'}${client.telefono || ''}`.replace(/\D/g, '');
   if (phone.length < 8 || !subscription.venceEl) return null;
   const days = Math.round((Date.parse(`${subscription.venceEl}T00:00:00Z`) - Date.parse(`${limaToday()}T00:00:00Z`)) / 86_400_000);
@@ -96,8 +97,10 @@ export default function App() {
   const [summary, setSummary] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [clients, setClients] = useState([]);
+  const [showArchivedClients, setShowArchivedClients] = useState(false);
   const [upcoming, setUpcoming] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [showRetiredAccounts, setShowRetiredAccounts] = useState(false);
   const [platforms, setPlatforms] = useState([]);
   const [settingsDraft, setSettingsDraft] = useState({ moneda: 'S/.', prefijoDefecto: '+51', proveedorNombre: '', proveedorTelefono: '', condiciones: {} });
   const [newPlatformName, setNewPlatformName] = useState('');
@@ -108,6 +111,9 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [modal, setModal] = useState(null);
   const [clientForm, setClientForm] = useState(emptyClient);
+  const [editForm, setEditForm] = useState(null);
+  const [delivery, setDelivery] = useState(null);
+  const deliveryTimer = useRef(null);
   const [accountForm, setAccountForm] = useState(emptyAccount);
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [renewForm, setRenewForm] = useState(null);
@@ -127,8 +133,8 @@ export default function App() {
     setUpcoming(u.items);
   }
 
-  async function loadClients(nextPage = page, nextSearch = search) {
-    const data = await api(`/clientes?pagina=${nextPage}&limite=25&buscar=${encodeURIComponent(nextSearch)}`);
+  async function loadClients(nextPage = page, nextSearch = search, archived = showArchivedClients) {
+    const data = await api(`/clientes?pagina=${nextPage}&limite=25&buscar=${encodeURIComponent(nextSearch)}&archivados=${archived ? '1' : '0'}`);
     setClients(data.items);
     setTotal(data.total);
   }
@@ -160,7 +166,13 @@ export default function App() {
 
   async function signOut() {
     try { await api('/logout', { method: 'POST' }); }
-    finally { setSignedIn(false); setAccounts([]); setClients([]); setSelected(null); setRevealed(null); }
+    finally { clearPreparedDelivery(); setSignedIn(false); setAccounts([]); setClients([]); setSelected(null); setRevealed(null); }
+  }
+
+  function clearPreparedDelivery() {
+    if (deliveryTimer.current) window.clearTimeout(deliveryTimer.current);
+    deliveryTimer.current = null;
+    setDelivery(null);
   }
 
   async function refresh() {
@@ -201,6 +213,59 @@ export default function App() {
         venceEl: clientForm.venceEl, ingresosCentimos, costosCentimos,
       }) });
       setModal(null); flash('Cliente guardado.'); await refresh(); setView('clientes');
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  }
+
+  function openEditClient(subscription) {
+    setEditForm({ clienteId: selected.id, suscripcionId: subscription.id,
+      expectedVersion: subscription.version, nombre: selected.nombre,
+      prefijo: selected.prefijo, telefono: selected.telefono || '',
+      plataformaId: subscription.plataformaId, cuentaId: subscription.cuentaId || '',
+      perfil: subscription.perfil || '', fechaInicio: subscription.fechaInicio || '',
+      venceEl: subscription.venceEl, pin: '', quitarPin: false });
+    setModal('editar-cliente');
+  }
+
+  async function saveEditClient(event) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      await api(`/clientes/${editForm.clienteId}`, { method: 'PATCH', body: JSON.stringify(editForm) });
+      const id = editForm.clienteId;
+      setEditForm(null); setModal(null); flash('Datos del cliente actualizados.');
+      await refresh(); await selectClient(id);
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  }
+
+  async function changeClientArchive(archived) {
+    if (archived && !window.confirm(`¿Retirar a ${selected.nombre}? Podrás restaurarlo sin perder cobros ni historial.`)) return;
+    setBusy(true); setError('');
+    try {
+      const id = selected.id;
+      await api(`/clientes/${id}/${archived ? 'archivar' : 'restaurar'}`, { method: 'POST' });
+      flash(archived ? 'Cliente retirado.' : 'Cliente restaurado.');
+      await refresh(); await selectClient(id);
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  }
+
+  async function changeAccountArchive(account, retired) {
+    if (retired && !window.confirm(`¿Retirar la cuenta de ${account.plataforma}? Primero deben estar desasignados todos sus perfiles.`)) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/cuentas/${account.id}/${retired ? 'retirar' : 'restaurar'}`, { method: 'POST' });
+      flash(retired ? 'Cuenta retirada.' : 'Cuenta restaurada.'); await refresh();
+    } catch (cause) { setError(cause.message); }
+    finally { setBusy(false); }
+  }
+
+  async function openDelivery(subscription) {
+    setBusy(true); setError(''); clearPreparedDelivery();
+    try {
+      const prepared = await api(`/suscripciones/${subscription.id}/entrega`, { method: 'POST' });
+      setDelivery(prepared); setModal('entrega');
+      deliveryTimer.current = window.setTimeout(() => { clearPreparedDelivery(); setModal((current) => current === 'entrega' ? null : current); }, 120_000);
     } catch (cause) { setError(cause.message); }
     finally { setBusy(false); }
   }
@@ -291,7 +356,8 @@ export default function App() {
     : view === 'clientes' ? 'Directorio de clientes'
       : view === 'cuentas' ? 'Cuentas de servicio' : view === 'ajustes' ? 'Configuración' : selected?.nombre || 'Cliente';
   const accountGroups = platforms.map((platform) => ({ ...platform,
-    items: accounts.filter((account) => account.plataformaId === platform.id),
+    items: accounts.filter((account) => account.plataformaId === platform.id
+      && (showRetiredAccounts ? account.estado === 'retirada' : account.estado !== 'retirada')),
   })).filter((group) => group.items.length);
 
   if (!DEMO && !signedIn) return <div className="login-page"><form className="login-card" onSubmit={signIn}>
@@ -352,20 +418,20 @@ export default function App() {
               {!upcoming.length && <p className="empty">No hay próximos vencimientos.</p>}</div></section>
         </>}
 
-        {view === 'clientes' && <section className="panel"><form className="toolbar" onSubmit={searchClients}><div className="search-box"><Search size={18} /><input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Buscar nombre o teléfono" aria-label="Buscar nombre o teléfono" /></div><button className="secondary" type="submit">Buscar</button></form>
+        {view === 'clientes' && <section className="panel"><form className="toolbar" onSubmit={searchClients}><div className="search-box"><Search size={18} /><input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Buscar nombre o teléfono" aria-label="Buscar nombre o teléfono" /></div><button className="secondary" type="submit">Buscar</button><button className="secondary" type="button" onClick={async () => { const next = !showArchivedClients; setShowArchivedClients(next); setPage(1); await loadClients(1, search, next); }}>{showArchivedClients ? 'Ver activos' : 'Ver retirados'}</button></form>
           <div className="list">{clients.map((c) => <div className="client-entry" key={c.id}><ClientRow client={c} onClick={() => selectClient(c.id)} /><RenewalButton client={c} compact /></div>)}
             {!clients.length && !loading && <p className="empty">No se encontraron clientes.</p>}</div>
-          <div className="pagination"><span>{total} clientes · Página {page}</span><div><button className="secondary" disabled={page <= 1} onClick={async () => { const next = page - 1; setPage(next); await loadClients(next); }}>Anterior</button><button className="secondary" disabled={page * 25 >= total} onClick={async () => { const next = page + 1; setPage(next); await loadClients(next); }}>Siguiente</button></div></div>
+          <div className="pagination"><span>{total} clientes {showArchivedClients ? 'retirados' : 'activos'} · Página {page}</span><div><button className="secondary" disabled={page <= 1} onClick={async () => { const next = page - 1; setPage(next); await loadClients(next); }}>Anterior</button><button className="secondary" disabled={page * 25 >= total} onClick={async () => { const next = page + 1; setPage(next); await loadClients(next); }}>Siguiente</button></div></div>
         </section>}
 
         {view === 'detalle' && selected && <><button className="text-button back" onClick={() => setView('clientes')}>← Volver al directorio</button>
-          <section className="panel"><div className="panel-head"><div><h2>Datos del cliente</h2><p>{selected.prefijo} {selected.telefono || 'Sin teléfono'}</p></div></div>
-            <div className="list">{selected.suscripciones.map((s) => <div className="detail-row" key={s.id}><div><strong>{s.plataforma}</strong><small>{s.perfil || 'Sin perfil'} · Vence {s.venceEl}</small>{s.cuentaOriginal && <small>Cuenta en Excel: {s.cuentaOriginal}{!s.cuentaId ? ' · pendiente de vincular' : ''}</small>}<small>Precio: compra {s.precioCompraCentimos == null ? '—' : money(s.precioCompraCentimos)} · venta {s.precioVentaCentimos == null ? '—' : money(s.precioVentaCentimos)}</small><small>Histórico: ingresos {s.ingresosHistoricosCentimos == null ? 'Por conciliar' : money(s.ingresosHistoricosCentimos)} · costos {s.costosHistoricosCentimos == null ? 'Por conciliar' : money(s.costosHistoricosCentimos)} · renovaciones {s.renovacionesHistoricas ?? 'Por conciliar'}</small>{s.historialOriginal && <details className="legacy-history"><summary>Ver historial del Excel</summary><pre>{s.historialOriginal}</pre></details>}</div><span className={`pill ${status(s.venceEl).className}`}>{status(s.venceEl).text}</span><RenewalButton client={selected} subscription={s} /><button className="secondary" onClick={() => openRenew(s)}>Registrar renovación</button></div>)}</div></section>
+          <section className="panel"><div className="panel-head"><div><h2>Datos del cliente {selected.archivadoEn && <span className="pill neutral">Retirado</span>}</h2><p>{selected.prefijo} {selected.telefono || 'Sin teléfono'}</p></div><button className="secondary" disabled={busy} onClick={() => changeClientArchive(!selected.archivadoEn)}>{selected.archivadoEn ? <RotateCcw size={16} /> : <Archive size={16} />}{selected.archivadoEn ? 'Restaurar' : 'Retirar cliente'}</button></div>
+            <div className="list">{selected.suscripciones.map((s) => <div className="detail-row" key={s.id}><div><strong>{s.plataforma}</strong><small>{s.perfil || 'Sin perfil'} · Vence {s.venceEl}</small>{s.cuentaOriginal && <small>Cuenta en Excel: {s.cuentaOriginal}{!s.cuentaId ? ' · pendiente de vincular' : ''}</small>}<small>Precio: compra {s.precioCompraCentimos == null ? '—' : money(s.precioCompraCentimos)} · venta {s.precioVentaCentimos == null ? '—' : money(s.precioVentaCentimos)}</small><small>Histórico: ingresos {s.ingresosHistoricosCentimos == null ? 'Por conciliar' : money(s.ingresosHistoricosCentimos)} · costos {s.costosHistoricosCentimos == null ? 'Por conciliar' : money(s.costosHistoricosCentimos)} · renovaciones {s.renovacionesHistoricas ?? 'Por conciliar'}</small>{s.historialOriginal && <details className="legacy-history"><summary>Ver historial del Excel</summary><pre>{s.historialOriginal}</pre></details>}</div><span className={`pill ${selected.archivadoEn ? 'neutral' : status(s.venceEl).className}`}>{selected.archivadoEn ? 'Retirado' : status(s.venceEl).text}</span><div className="detail-actions"><button className="secondary" disabled={busy || !!selected.archivadoEn} onClick={() => openEditClient(s)}>Editar datos</button><button className="secondary" disabled={busy || !!selected.archivadoEn} onClick={() => openDelivery(s)}>Entregar acceso</button><RenewalButton client={selected} subscription={s} /><button className="secondary" disabled={!!selected.archivadoEn} onClick={() => openRenew(s)}>Registrar renovación</button></div></div>)}</div></section>
           <section className="panel"><div className="panel-head"><div><h2>Movimientos recientes</h2><p>Cobros y costos posteriores a la migración.</p></div></div><div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Cobro</th><th>Costo</th><th>Margen</th></tr></thead><tbody>{selected.movimientos.map((m) => <tr key={m.id}><td>{m.fechaCobro}</td><td>{m.tipo}</td><td>{money(m.ingresosCentimos)}</td><td>{money(m.costosCentimos)}</td><td>{money(m.ingresosCentimos - m.costosCentimos)}</td></tr>)}</tbody></table>{!selected.movimientos.length && <p className="empty">Sin movimientos nuevos.</p>}</div></section>
         </>}
 
-        {view === 'cuentas' && <section className="panel"><div className="panel-head"><div><h2>Inventario de cuentas</h2><p>{accounts.length} cuentas agrupadas por plataforma. Abre un grupo para ver sus cuentas y vencimientos.</p></div></div><div className="account-groups">{accountGroups.map((group, index) => <details className="account-group" key={group.id} open={index === 0}><summary><span>{group.nombre}</span><span className="group-count">{group.items.length} {group.items.length === 1 ? 'cuenta' : 'cuentas'}</span></summary><div className="list">{group.items.map((a) => <div className="account-row" key={a.id}><span className="account-mark"><KeyRound size={18} /></span><div className="account-info"><strong>{a.identificador}</strong><small>{a.perfilesAsignados} perfiles · Compra: {a.fechaCompra || 'Sin fecha'} · Vence: {a.venceEl || 'Sin fecha'}</small>{a.codigosUrl && <a href={a.codigosUrl} target="_blank" rel="noopener noreferrer" className="account-link">Abrir web de códigos ↗</a>}{a.nota && <p className="account-note">{a.nota}</p>}</div><span className={`pill ${accountStatus(a.venceEl).className}`}>{accountStatus(a.venceEl).text}</span><button className="secondary" onClick={() => editAccount(a)}>Editar</button><button className="secondary" onClick={() => reveal(a.id)}>{revealed?.accountId === a.id ? <EyeOff size={16} /> : <Eye size={16} />}{revealed?.accountId === a.id ? 'Ocultar en 20 s' : 'Revelar'}</button>{revealed?.accountId === a.id && <p className="revealed">Contraseña: <strong>{revealed.password}</strong>{revealed.codePassword && <> · Contraseña web de códigos: <strong>{revealed.codePassword}</strong></>}</p>}</div>)}</div></details>)}
-            {!accounts.length && !loading && <p className="empty">No hay cuentas cargadas.</p>}</div></section>}
+        {view === 'cuentas' && <section className="panel"><div className="panel-head"><div><h2>Inventario de cuentas</h2><p>{accounts.filter((account) => account.estado !== 'retirada').length} cuentas activas agrupadas por plataforma.</p></div><button className="secondary" onClick={() => setShowRetiredAccounts(!showRetiredAccounts)}>{showRetiredAccounts ? 'Ver activas' : 'Ver retiradas'}</button></div><div className="account-groups">{accountGroups.map((group, index) => <details className="account-group" key={group.id} open={index === 0}><summary><span>{group.nombre}</span><span className="group-count">{group.items.length} {group.items.length === 1 ? 'cuenta' : 'cuentas'}</span></summary><div className="list">{group.items.map((a) => <div className="account-row" key={a.id}><span className="account-mark"><KeyRound size={18} /></span><div className="account-info"><strong>{a.identificador}</strong><small>{a.perfilesAsignados} perfiles · Compra: {a.fechaCompra || 'Sin fecha'} · Vence: {a.venceEl || 'Sin fecha'}</small>{a.codigosUrl && <a href={a.codigosUrl} target="_blank" rel="noopener noreferrer" className="account-link">Abrir web de códigos ↗</a>}{a.nota && <p className="account-note">{a.nota}</p>}</div><span className={`pill ${a.estado === 'retirada' ? 'neutral' : accountStatus(a.venceEl).className}`}>{a.estado === 'retirada' ? 'Retirada' : accountStatus(a.venceEl).text}</span><button className="secondary" onClick={() => editAccount(a)}>Editar</button><button className="secondary" onClick={() => reveal(a.id)}>{revealed?.accountId === a.id ? <EyeOff size={16} /> : <Eye size={16} />}{revealed?.accountId === a.id ? 'Ocultar en 20 s' : 'Revelar'}</button><button className="secondary" disabled={busy} onClick={() => changeAccountArchive(a, a.estado !== 'retirada')}>{a.estado === 'retirada' ? 'Restaurar' : 'Retirar'}</button>{revealed?.accountId === a.id && <p className="revealed">Contraseña: <strong>{revealed.password}</strong>{revealed.codePassword && <> · Contraseña web de códigos: <strong>{revealed.codePassword}</strong></>}</p>}</div>)}</div></details>)}
+            {!accountGroups.length && !loading && <p className="empty">{showRetiredAccounts ? 'No hay cuentas retiradas.' : 'No hay cuentas activas.'}</p>}</div></section>}
         {view === 'ajustes' && <div className="settings-grid"><section className="panel"><div className="panel-head"><div><h2>Preferencias y proveedor</h2><p>Valores migrados desde la hoja Configuración.</p></div></div>
           <form className="form" onSubmit={saveSettings}><Field label="Moneda de los importes migrados"><input value={settingsDraft.moneda} readOnly aria-describedby="currency-note" /></Field><p id="currency-note" className="form-note">Los importes están guardados en soles. Cambiar la etiqueta no convertiría las cifras.</p>
             <Field label="Prefijo de país por defecto"><input required pattern="\+\d{1,4}" maxLength="5" value={settingsDraft.prefijoDefecto} onChange={(event) => setSettingsDraft({ ...settingsDraft, prefijoDefecto: event.target.value })} /></Field>
@@ -379,11 +445,21 @@ export default function App() {
     </div>
     <nav className="mobile-nav" aria-label="Navegación móvil">{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>
 
-    {modal && <div className="overlay" role="presentation"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="dialog-head"><h2 id="dialog-title">{modal === 'cliente' ? 'Nuevo cliente' : modal === 'cuenta' ? editingAccountId ? 'Editar cuenta' : 'Nueva cuenta' : `Renovar ${renewForm?.nombre}`}</h2><button className="icon-button" onClick={() => { setModal(null); setError(''); }} aria-label="Cerrar"><X size={19} /></button></div>
+    {modal && <div className="overlay" role="presentation"><div className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="dialog-head"><h2 id="dialog-title">{modal === 'cliente' ? 'Nuevo cliente' : modal === 'editar-cliente' ? 'Editar cliente' : modal === 'entrega' ? 'Revisar entrega de acceso' : modal === 'cuenta' ? editingAccountId ? 'Editar cuenta' : 'Nueva cuenta' : `Renovar ${renewForm?.nombre}`}</h2><button className="icon-button" onClick={() => { setModal(null); clearPreparedDelivery(); setError(''); }} aria-label="Cerrar"><X size={19} /></button></div>
       {error && <div className="message error dialog-error" role="alert"><AlertCircle size={17} />{error}</div>}
-      {modal === 'cliente' && <form onSubmit={saveClient} className="form"><Field label="Nombre"><input required maxLength="150" value={clientForm.nombre} onChange={(e) => setClientForm({ ...clientForm, nombre: e.target.value })} /></Field><div className="form-grid"><Field label="Prefijo"><input required value={clientForm.prefijo} onChange={(e) => setClientForm({ ...clientForm, prefijo: e.target.value })} /></Field><Field label="Teléfono"><input inputMode="tel" value={clientForm.telefono} onChange={(e) => setClientForm({ ...clientForm, telefono: e.target.value })} /></Field></div><Field label="Plataforma"><select required value={clientForm.plataformaId} onChange={(e) => setClientForm({ ...clientForm, plataformaId: e.target.value, cuentaId: '' })}><option value="">Selecciona</option>{platforms.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></Field><Field label="Cuenta (opcional)"><select value={clientForm.cuentaId} onChange={(e) => setClientForm({ ...clientForm, cuentaId: e.target.value })}><option value="">Sin asignar</option>{accounts.filter((a) => a.plataformaId === clientForm.plataformaId).map((a) => <option key={a.id} value={a.id}>{a.identificador}</option>)}</select></Field><div className="form-grid"><Field label="Perfil"><input value={clientForm.perfil} onChange={(e) => setClientForm({ ...clientForm, perfil: e.target.value })} /></Field><Field label="PIN"><input inputMode="numeric" value={clientForm.pin} onChange={(e) => setClientForm({ ...clientForm, pin: e.target.value })} /></Field></div><div className="form-grid"><Field label="Inicio"><input required type="date" value={clientForm.fechaInicio} onChange={(e) => setClientForm({ ...clientForm, fechaInicio: e.target.value })} /></Field><Field label="Vencimiento"><input required type="date" value={clientForm.venceEl} onChange={(e) => setClientForm({ ...clientForm, venceEl: e.target.value })} /></Field></div><div className="form-grid"><Field label="Cobro (S/)"><input required inputMode="decimal" value={clientForm.ingresos} onChange={(e) => setClientForm({ ...clientForm, ingresos: e.target.value })} /></Field><Field label="Costo (S/)"><input required inputMode="decimal" value={clientForm.costos} onChange={(e) => setClientForm({ ...clientForm, costos: e.target.value })} /></Field></div><button className="primary submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cliente'}</button></form>}
+      {modal === 'cliente' && <form onSubmit={saveClient} className="form"><Field label="Nombre"><input required maxLength="150" value={clientForm.nombre} onChange={(e) => setClientForm({ ...clientForm, nombre: e.target.value })} /></Field><div className="form-grid"><Field label="Prefijo"><input required value={clientForm.prefijo} onChange={(e) => setClientForm({ ...clientForm, prefijo: e.target.value })} /></Field><Field label="Teléfono"><input inputMode="tel" value={clientForm.telefono} onChange={(e) => setClientForm({ ...clientForm, telefono: e.target.value })} /></Field></div><Field label="Plataforma"><select required value={clientForm.plataformaId} onChange={(e) => setClientForm({ ...clientForm, plataformaId: e.target.value, cuentaId: '' })}><option value="">Selecciona</option>{platforms.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></Field><Field label="Cuenta (opcional)"><select value={clientForm.cuentaId} onChange={(e) => setClientForm({ ...clientForm, cuentaId: e.target.value })}><option value="">Sin asignar</option>{accounts.filter((a) => a.estado === 'activa' && a.plataformaId === clientForm.plataformaId).map((a) => <option key={a.id} value={a.id}>{a.identificador}</option>)}</select></Field><div className="form-grid"><Field label="Perfil"><input value={clientForm.perfil} onChange={(e) => setClientForm({ ...clientForm, perfil: e.target.value })} /></Field><Field label="PIN"><input inputMode="numeric" value={clientForm.pin} onChange={(e) => setClientForm({ ...clientForm, pin: e.target.value })} /></Field></div><div className="form-grid"><Field label="Inicio"><input required type="date" value={clientForm.fechaInicio} onChange={(e) => setClientForm({ ...clientForm, fechaInicio: e.target.value })} /></Field><Field label="Vencimiento"><input required type="date" value={clientForm.venceEl} onChange={(e) => setClientForm({ ...clientForm, venceEl: e.target.value })} /></Field></div><div className="form-grid"><Field label="Cobro (S/)"><input required inputMode="decimal" value={clientForm.ingresos} onChange={(e) => setClientForm({ ...clientForm, ingresos: e.target.value })} /></Field><Field label="Costo (S/)"><input required inputMode="decimal" value={clientForm.costos} onChange={(e) => setClientForm({ ...clientForm, costos: e.target.value })} /></Field></div><button className="primary submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cliente'}</button></form>}
       {modal === 'renovar' && <form onSubmit={saveRenew} className="form"><div className="form-grid"><Field label="Fecha de cobro"><input required type="date" value={renewForm.fechaCobro} onChange={(e) => setRenewForm({ ...renewForm, fechaCobro: e.target.value })} /></Field><Field label="Nuevo vencimiento"><input required type="date" value={renewForm.venceEl} onChange={(e) => setRenewForm({ ...renewForm, venceEl: e.target.value })} /></Field></div><div className="form-grid"><Field label="Cobro (S/)"><input required inputMode="decimal" value={renewForm.ingresos} onChange={(e) => setRenewForm({ ...renewForm, ingresos: e.target.value })} /></Field><Field label="Costo (S/)"><input required inputMode="decimal" value={renewForm.costos} onChange={(e) => setRenewForm({ ...renewForm, costos: e.target.value })} /></Field></div><button className="primary submit" disabled={busy}>{busy ? 'Guardando…' : 'Confirmar renovación'}</button></form>}
       {modal === 'cuenta' && <form onSubmit={saveAccount} className="form"><Field label="Plataforma"><select required disabled={!!editingAccountId} value={accountForm.plataformaId} onChange={(e) => setAccountForm({ ...accountForm, plataformaId: e.target.value })}><option value="">Selecciona</option>{platforms.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></Field><Field label="Correo o identificador"><input required disabled={!!editingAccountId} value={accountForm.identificador} onChange={(e) => setAccountForm({ ...accountForm, identificador: e.target.value })} /></Field><Field label={editingAccountId ? 'Nueva contraseña (opcional)' : 'Contraseña'}><input required={!editingAccountId} type="password" autoComplete="new-password" value={accountForm.contrasena} onChange={(e) => setAccountForm({ ...accountForm, contrasena: e.target.value })} /></Field><div className="form-grid"><Field label="Fecha de compra"><input required={!editingAccountId} type="date" value={accountForm.fechaCompra} onChange={(e) => setAccountForm({ ...accountForm, fechaCompra: e.target.value })} /></Field><Field label="Fecha de vencimiento"><input required={!editingAccountId} type="date" value={accountForm.venceEl} onChange={(e) => setAccountForm({ ...accountForm, venceEl: e.target.value })} /></Field></div><Field label="Web de códigos (URL)"><input type="url" placeholder="https://" maxLength="2048" value={accountForm.codigosUrl} onChange={(e) => setAccountForm({ ...accountForm, codigosUrl: e.target.value })} /></Field><Field label="Contraseña de la web de códigos"><input type="password" autoComplete="new-password" maxLength="500" value={accountForm.codigoPassword} onChange={(e) => setAccountForm({ ...accountForm, codigoPassword: e.target.value })} /></Field><Field label="Nota libre"><textarea maxLength="4000" rows="3" value={accountForm.nota} onChange={(e) => setAccountForm({ ...accountForm, nota: e.target.value })} /></Field><button className="primary submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cuenta'}</button></form>}
+      {modal === 'editar-cliente' && editForm && <form onSubmit={saveEditClient} className="form"><p className="form-note">Los cobros y costos registrados se conservan como historial. Aquí puedes corregir datos del cliente, asignación y fechas.</p>
+        <Field label="Nombre"><input required maxLength="150" value={editForm.nombre} onChange={(event) => setEditForm({ ...editForm, nombre: event.target.value })} /></Field>
+        <div className="form-grid"><Field label="Prefijo"><input required pattern="\+\d{1,4}" value={editForm.prefijo} onChange={(event) => setEditForm({ ...editForm, prefijo: event.target.value })} /></Field><Field label="Teléfono"><input inputMode="tel" value={editForm.telefono} onChange={(event) => setEditForm({ ...editForm, telefono: event.target.value })} /></Field></div>
+        <Field label="Plataforma"><select required value={editForm.plataformaId} onChange={(event) => setEditForm({ ...editForm, plataformaId: event.target.value, cuentaId: '' })}>{platforms.map((platform) => <option key={platform.id} value={platform.id}>{platform.nombre}</option>)}</select></Field>
+        <Field label="Cuenta asignada"><select value={editForm.cuentaId} onChange={(event) => setEditForm({ ...editForm, cuentaId: event.target.value })}><option value="">Sin asignar</option>{accounts.filter((account) => account.estado === 'activa' && account.plataformaId === editForm.plataformaId).map((account) => <option key={account.id} value={account.id}>{account.identificador}</option>)}</select></Field>
+        <div className="form-grid"><Field label="Perfil"><input maxLength="100" value={editForm.perfil} onChange={(event) => setEditForm({ ...editForm, perfil: event.target.value })} /></Field><Field label="Nuevo PIN (opcional)"><input inputMode="numeric" pattern="[0-9]*" maxLength="50" disabled={editForm.quitarPin} value={editForm.pin} onChange={(event) => setEditForm({ ...editForm, pin: event.target.value })} /></Field></div>
+        <label className="checkbox-field"><input type="checkbox" checked={editForm.quitarPin} onChange={(event) => setEditForm({ ...editForm, quitarPin: event.target.checked, pin: '' })} />Quitar PIN actual</label>
+        <div className="form-grid"><Field label="Fecha de inicio"><input type="date" value={editForm.fechaInicio} onChange={(event) => setEditForm({ ...editForm, fechaInicio: event.target.value })} /></Field><Field label="Vencimiento"><input required type="date" value={editForm.venceEl} onChange={(event) => setEditForm({ ...editForm, venceEl: event.target.value })} /></Field></div>
+        <button className="primary submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cambios'}</button></form>}
+      {modal === 'entrega' && delivery && <div className="form"><p className="form-note">Revisa el número y el contenido antes de abrir WhatsApp. Este mensaje incluye contraseñas y, si existe, el PIN.</p><Field label="Número de destino"><input readOnly value={`+${delivery.telefono}`} /></Field><Field label="Mensaje preparado"><textarea readOnly rows="13" value={delivery.mensaje} /></Field><a className="primary submit" href={`https://api.whatsapp.com/send?phone=${delivery.telefono}&text=${encodeURIComponent(delivery.mensaje)}`} target="_blank" rel="noopener noreferrer" onClick={() => { clearPreparedDelivery(); setModal(null); }}>Abrir WhatsApp para enviar</a></div>}
     </div></div>}
   </div>;
 }
@@ -429,6 +505,6 @@ function PlatformChart({ platforms }) {
 }
 
 function ClientRow({ client, onClick }) {
-  const state = status(client.venceEl);
+  const state = client.archivadoEn ? { text: 'Retirado', className: 'neutral' } : status(client.venceEl);
   return <button className="client-row" onClick={onClick}><span className="initials">{client.nombre?.slice(0, 2).toUpperCase()}</span><span className="client-name"><strong>{client.nombre}</strong><small>{client.plataforma || 'Sin suscripción'} · {client.prefijo} {client.telefono || 'Sin teléfono'}</small></span><span className="expires">{client.venceEl || '—'}</span><span className={`pill ${state.className}`}>{state.text}</span><ArrowRight size={17} className="row-arrow" /></button>;
 }
