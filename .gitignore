@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+cloudflare/.migration/
+cloudflare/.dev.vars
+cloudflare/.wrangler/
+__pycache__/
+*.pyc

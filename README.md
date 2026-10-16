@@ -1,16 +1,5 @@
-# React + Vite
+# DoroStream
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+La nueva aplicación privada está publicada en [DoroStream Cloudflare](https://dorostream-api.juaca12314-2bf.workers.dev). Usa una PWA React, un Cloudflare Worker y una base D1. El código, las migraciones y la auditoría reproducible de importación están en [cloudflare/](cloudflare/README.md).
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+La aplicación React anterior en `src/` sigue disponible como referencia durante la transición desde Apps Script. Los datos del Excel y las claves no están en Git. La importación de D1 fue verificada contra el XLSX original mediante recuentos, claves foráneas y un respaldo cifrado idéntico byte por byte.
