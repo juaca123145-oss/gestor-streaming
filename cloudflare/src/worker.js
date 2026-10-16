@@ -1,6 +1,7 @@
 import { authenticate, login, logout, mayManageAccounts } from './auth.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
 import { addDays, limaToday, textField, validCents, validDate } from './validation.js';
+import { operations } from './operations.js';
 
 const headers = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -61,9 +62,10 @@ async function summary(env) {
       .bind(monthStart, nextMonth),
     env.DB.prepare(`SELECT
       (SELECT COALESCE(SUM(ingresos_centimos - costos_centimos), 0) FROM saldos_iniciales
-        WHERE estado_revision = 'verificado' AND ingresos_centimos IS NOT NULL AND costos_centimos IS NOT NULL)
+        WHERE estado_revision = 'verificado' AND COALESCE(resolucion,'') <> 'base_legacy' AND ingresos_centimos IS NOT NULL AND costos_centimos IS NOT NULL)
       + (SELECT COALESCE(SUM(ingresos_centimos - costos_centimos), 0) FROM movimientos) AS margen_centimos,
-      (SELECT COUNT(*) FROM saldos_iniciales WHERE estado_revision = 'pendiente') AS pendientes`),
+      (SELECT COUNT(*) FROM saldos_iniciales WHERE estado_revision = 'pendiente') AS pendientes,
+      (SELECT COALESCE(SUM(ingresos_centimos-costos_centimos),0) FROM saldos_iniciales WHERE resolucion='base_legacy') AS reconstruido`),
   ]);
   const margenExcelMes = legacyMonth.results[0].margen_centimos;
   const margenMovimientosMes = movementsMonth.results[0].margen_centimos;
@@ -79,6 +81,7 @@ async function summary(env) {
     ventasExcelSinImporte: legacyMonth.results[0].sin_importe || 0,
     margenHistoricoVerificadoCentimos: historical.results[0].margen_centimos,
     saldosPendientes: historical.results[0].pendientes,
+    margenReconstruidoCentimos: historical.results[0].reconstruido,
     fecha: today,
   });
 }
@@ -205,14 +208,14 @@ async function getClient(id, env) {
     s.precio_compra_centimos AS precioCompraCentimos, s.precio_venta_centimos AS precioVentaCentimos,
     b.ingresos_centimos AS ingresosHistoricosCentimos,
     b.costos_centimos AS costosHistoricosCentimos, b.renovaciones AS renovacionesHistoricas,
-    b.estado_revision AS estadoRevision, h.json_original AS historialOriginal
+    b.estado_revision AS estadoRevision, b.resolucion, b.evidencia, h.json_original AS historialOriginal
     FROM suscripciones s JOIN plataformas p ON p.id = s.plataforma_id
     LEFT JOIN saldos_iniciales b ON b.suscripcion_id = s.id
     LEFT JOIN historial_legacy h ON h.suscripcion_id = s.id
     WHERE s.cliente_id = ? ORDER BY s.vence_el DESC`).bind(id).all();
   const movements = await env.DB.prepare(`SELECT m.id, m.suscripcion_id AS suscripcionId, m.tipo,
     m.fecha_cobro AS fechaCobro, m.ingresos_centimos AS ingresosCentimos,
-    m.costos_centimos AS costosCentimos, m.vencimiento_nuevo AS vencimientoNuevo
+    m.costos_centimos AS costosCentimos, m.vencimiento_nuevo AS vencimientoNuevo, m.metodo_pago AS metodoPago
     FROM movimientos m JOIN suscripciones s ON s.id = m.suscripcion_id
     WHERE s.cliente_id = ? ORDER BY m.fecha_cobro DESC, m.creado_en DESC LIMIT 100`).bind(id).all();
   return json({ ...client, suscripciones: subscriptions.results, movimientos: movements.results });
@@ -297,6 +300,7 @@ async function createClient(request, env, actor) {
     || !validCents(body.ingresosCentimos) || !validCents(body.costosCentimos)) {
     return error('Datos de cliente inválidos');
   }
+  if (body.metodoPago != null && !['Yape','Plin','Transferencia','Efectivo','Otro'].includes(body.metodoPago)) return error('Método de pago inválido');
   const phone = cleanPhone(body.telefono);
   if (body.telefono && !phone) return error('Teléfono inválido');
   const prefix = typeof body.prefijo === 'string' && /^\+\d{1,4}$/.test(body.prefijo)
@@ -330,14 +334,15 @@ async function createClient(request, env, actor) {
       ),
       env.DB.prepare(`INSERT INTO movimientos
         (id, suscripcion_id, tipo, operation_key, request_hash, expected_version, fecha_cobro,
-         ingresos_centimos, costos_centimos, vencimiento_nuevo, creado_por)
-        VALUES (?, ?, 'alta', ?, ?, 0, ?, ?, ?, ?, ?)`).bind(
+         ingresos_centimos, costos_centimos, vencimiento_nuevo, creado_por, metodo_pago)
+        VALUES (?, ?, 'alta', ?, ?, 0, ?, ?, ?, ?, ?, ?)`).bind(
         movementId, subscriptionId, operationKey, operationKey,
-        body.fechaInicio, body.ingresosCentimos, body.costosCentimos, body.venceEl,
-        actor.access_subject,
+        body.fechaInicio, body.pendiente === true ? 0 : body.ingresosCentimos, body.costosCentimos, body.venceEl,
+        actor.access_subject, body.pendiente === true ? null : body.metodoPago || null,
       ),
       env.DB.prepare('UPDATE suscripciones SET version = 1 WHERE id = ? AND version = 0')
         .bind(subscriptionId),
+      ...pendingDebt(env, body, subscriptionId, body.fechaInicio, 'Alta pendiente'),
     ]);
     return json({ id: clientId, suscripcionId: subscriptionId }, 201);
   } catch {
@@ -351,8 +356,15 @@ async function hashBody(body) {
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+function pendingDebt(env, body, subscriptionId, date, concept) {
+  return body.pendiente === true && body.ingresosCentimos > 0
+    ? [env.DB.prepare('INSERT INTO deudas(id,suscripcion_id,concepto,importe_centimos,fecha) VALUES(?,?,?,?,?)')
+      .bind(uuid(), subscriptionId, concept, body.ingresosCentimos, date)] : [];
+}
+
 async function renew(request, env, actor, subscriptionId) {
   const body = await bodyOf(request);
+  if (body?.metodoPago != null && !['Yape','Plin','Transferencia','Efectivo','Otro'].includes(body.metodoPago)) return error('Método de pago inválido');
   const operationKey = request.headers.get('Idempotency-Key');
   if (!body || !operationKey || !/^[A-Za-z0-9_-]{16,100}$/.test(operationKey)
     || !Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 0
@@ -363,7 +375,7 @@ async function renew(request, env, actor, subscriptionId) {
   const canonical = {
     subscriptionId, expectedVersion: body.expectedVersion, fechaCobro: body.fechaCobro,
     venceEl: body.venceEl, ingresosCentimos: body.ingresosCentimos,
-    costosCentimos: body.costosCentimos,
+    costosCentimos: body.costosCentimos, pendiente: body.pendiente === true, metodoPago: body.metodoPago || null,
   };
   const requestHash = await hashBody(canonical);
   const existing = await env.DB.prepare('SELECT id, request_hash FROM movimientos WHERE operation_key = ?')
@@ -385,14 +397,15 @@ async function renew(request, env, actor, subscriptionId) {
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO movimientos
         (id, suscripcion_id, tipo, operation_key, request_hash, expected_version, fecha_cobro,
-         ingresos_centimos, costos_centimos, vencimiento_anterior, vencimiento_nuevo, creado_por)
-        VALUES (?, ?, 'renovacion', ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+         ingresos_centimos, costos_centimos, vencimiento_anterior, vencimiento_nuevo, creado_por, metodo_pago)
+        VALUES (?, ?, 'renovacion', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
         movementId, subscriptionId, operationKey, requestHash, body.expectedVersion,
-        body.fechaCobro, body.ingresosCentimos, body.costosCentimos,
-        current.vence_el, body.venceEl, actor.access_subject,
+        body.fechaCobro, body.pendiente === true ? 0 : body.ingresosCentimos, body.costosCentimos,
+        current.vence_el, body.venceEl, actor.access_subject, body.pendiente === true ? null : body.metodoPago || null,
       ),
       env.DB.prepare(`UPDATE suscripciones SET vence_el = ?, version = version + 1
         WHERE id = ? AND version = ?`).bind(body.venceEl, subscriptionId, body.expectedVersion),
+      ...pendingDebt(env, body, subscriptionId, body.fechaCobro, 'Renovación pendiente'),
     ]);
     return json({ id: movementId, version: body.expectedVersion + 1 }, 201);
   } catch {
@@ -406,7 +419,8 @@ async function renew(request, env, actor, subscriptionId) {
 async function listAccounts(env) {
   const result = await env.DB.prepare(`SELECT a.id, a.plataforma_id AS plataformaId,
     p.nombre AS plataforma, a.identificador, a.estado, a.fecha_compra AS fechaCompra,
-    a.vence_el AS venceEl, a.codigos_url AS codigosUrl, a.nota,
+    a.vence_el AS venceEl, a.codigos_url AS codigosUrl, a.nota, a.capacidad,
+    EXISTS(SELECT 1 FROM secretos_cuenta WHERE cuenta_id=a.id) AS tieneCredencial,
     COUNT(s.id) AS perfilesAsignados
     FROM cuentas_servicio a JOIN plataformas p ON p.id = a.plataforma_id
     LEFT JOIN suscripciones s ON s.cuenta_id = a.id
@@ -476,17 +490,18 @@ async function updateAccount(request, env, accountId) {
   const statements = [env.DB.prepare(`UPDATE cuentas_servicio
     SET fecha_compra = ?, vence_el = ?, codigos_url = ?, nota = ? WHERE id = ?`)
     .bind(details.fechaCompra, details.venceEl, details.codigosUrl, details.nota, accountId)];
+  if (body.contrasena) {
+    if (!textField(body.contrasena, 500)) return error('Contraseña inválida');
+    const secret = await encryptSecret(body.contrasena, env);
+    statements.push(env.DB.prepare(`INSERT INTO secretos_cuenta(cuenta_id,ciphertext,nonce,clave_version)
+      VALUES(?,?,?,?) ON CONFLICT(cuenta_id) DO UPDATE SET ciphertext=excluded.ciphertext,
+      nonce=excluded.nonce,clave_version=excluded.clave_version,actualizado_en=datetime('now')`)
+      .bind(accountId, secret.ciphertext, secret.nonce, secret.keyVersion));
+  }
   if (codeSecret) statements.push(env.DB.prepare(`UPDATE secretos_cuenta
     SET codigo_password_ciphertext = ?, codigo_password_nonce = ?,
       codigo_password_clave_version = ?, actualizado_en = datetime('now') WHERE cuenta_id = ?`)
     .bind(codeSecret.ciphertext, codeSecret.nonce, codeSecret.keyVersion, accountId));
-  if (body.contrasena) {
-    if (!textField(body.contrasena, 500)) return error('Contraseña inválida');
-    const secret = await encryptSecret(body.contrasena, env);
-    statements.push(env.DB.prepare(`UPDATE secretos_cuenta
-      SET ciphertext = ?, nonce = ?, clave_version = ?, actualizado_en = datetime('now') WHERE cuenta_id = ?`)
-      .bind(secret.ciphertext, secret.nonce, secret.keyVersion, accountId));
-  }
   await env.DB.batch(statements);
   return json({ id: accountId });
 }
@@ -599,6 +614,8 @@ export default {
     }
 
     try {
+      const operational = await operations(request, env, actor);
+      if (operational) return operational;
       if (request.method === 'POST' && url.pathname === '/api/logout') return logout();
       if (request.method === 'GET' && url.pathname === '/api/session') return json({ correo: actor.correo, rol: actor.rol });
       if (request.method === 'GET' && url.pathname === '/api/resumen') return summary(env);

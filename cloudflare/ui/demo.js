@@ -34,10 +34,49 @@ const movements = [
 ];
 
 const clone = (value) => structuredClone(value);
+const demoDebts = [], demoPayments = [];
 
 export async function demoApi(path, options = {}) {
   const url = new URL(path, 'http://demo.local');
   const method = options.method || 'GET';
+
+  if (url.pathname.startsWith('/operaciones/')) {
+    const body = options.body ? JSON.parse(options.body) : {};
+    if (url.pathname === '/operaciones/vencimientos') return { fecha: date(0),
+      clientes: clone(clients.filter((c) => !c.archivadoEn && c.venceEl <= date(7))),
+      cuentas: clone(accounts.filter((a) => a.estado === 'activa' && (!a.venceEl || a.venceEl <= date(7)))) };
+    if (url.pathname === '/operaciones/cupos') return { items: accounts.map((a) => ({ ...a,
+      capacidad: a.capacidad ?? null, ocupados: clients.filter((c) => c.cuentaId === a.id).length,
+      tieneCredencial: !!a.password, miembros: clients.filter((c) => c.cuentaId === a.id).map((c) => ({ ...c, clienteId: c.id })) })) };
+    if (url.pathname.startsWith('/operaciones/cupos/')) {
+      const a = accounts.find((a) => a.id === url.pathname.split('/').at(-1));
+      if (!a) throw new Error('Cuenta no encontrada');
+      if (body.capacidad !== null && body.capacidad < clients.filter((c) => c.cuentaId === a.id).length) throw new Error('La capacidad no puede ser menor que las asignaciones');
+      a.capacidad = body.capacidad; return { ok: true };
+    }
+    if (url.pathname === '/operaciones/pagos' && method === 'GET') return { items: demoDebts.map((d) => ({ ...d,
+      pagado: demoPayments.filter((a) => a.deuda_id === d.id).reduce((sum, a) => sum + a.importe_centimos, 0) })),
+      abonos: clone(demoPayments), suscripciones: clients.filter((c) => !c.archivadoEn).map((c) => ({ id: c.suscripcionId, nombre: c.nombre, plataforma: c.plataforma })) };
+    if (url.pathname === '/operaciones/pagos' && method === 'POST') {
+      const c = clients.find((c) => c.suscripcionId === body.suscripcionId);
+      if (!c || !Number.isInteger(body.importeCentimos) || body.importeCentimos <= 0) throw new Error('Deuda inválida');
+      demoDebts.push({ id: crypto.randomUUID(), suscripcion_id: c.suscripcionId, nombre: c.nombre, plataforma: c.plataforma,
+        concepto: body.concepto, importe_centimos: body.importeCentimos, fecha: body.fecha }); return { ok: true };
+    }
+    if (url.pathname.endsWith('/abonos')) {
+      const d = demoDebts.find((d) => d.id === url.pathname.split('/').at(-2));
+      const paid = demoPayments.filter((a) => a.deuda_id === d?.id).reduce((sum, a) => sum + a.importe_centimos, 0);
+      if (!d || body.importeCentimos <= 0 || body.importeCentimos + paid > d.importe_centimos) throw new Error('Abono inválido o superior a la deuda');
+      demoPayments.push({ id: crypto.randomUUID(), deuda_id: d.id, importe_centimos: body.importeCentimos, fecha: body.fecha, metodo: body.metodo });
+      movements.push({ id: crypto.randomUUID(), suscripcionId: d.suscripcion_id, tipo: 'ajuste', ingresosCentimos: body.importeCentimos, costosCentimos: 0, fechaCobro: body.fecha }); return { ok: true };
+    }
+    if (url.pathname === '/operaciones/rentabilidad') return { mes: url.searchParams.get('mes'), items: platforms.map((p) => {
+      const rows = movements.filter((m) => m.fechaCobro.startsWith(url.searchParams.get('mes')) && clients.some((c) => c.suscripcionId === m.suscripcionId && c.plataformaId === p.id));
+      return { nombre: p.nombre, ingresos: rows.reduce((s, r) => s + r.ingresosCentimos, 0), costos: rows.reduce((s, r) => s + r.costosCentimos, 0), registros: rows.length, incompletos: 0 };
+    }) };
+    if (url.pathname === '/operaciones/revision') return { saldos: [], referencias: [], sinCredenciales: [] };
+    throw new Error('Esta acción requiere iniciar sesión en la aplicación real.');
+  }
 
   if (url.pathname === '/resumen') {
     const current = date(0);
@@ -139,12 +178,15 @@ export async function demoApi(path, options = {}) {
     if (!platform) throw new Error('Selecciona una plataforma.');
     const id = crypto.randomUUID();
     const suscripcionId = crypto.randomUUID();
+    const account = accounts.find((a) => a.id === body.cuentaId);
+    if (account?.capacidad != null && clients.filter((c) => c.cuentaId === account.id).length >= account.capacidad) throw new Error('Cuenta sin cupos');
     clients.push({ id, suscripcionId, nombre: body.nombre, prefijo: body.prefijo,
       telefono: body.telefono, plataformaId: platform.id, plataforma: platform.nombre,
       cuentaId: body.cuentaId, fechaInicio: body.fechaInicio, venceEl: body.venceEl,
       estado: 'activa', version: 1, perfil: body.perfil, archivadoEn: null });
     movements.push({ id: crypto.randomUUID(), suscripcionId, tipo: 'alta', fechaCobro: body.fechaInicio,
-      ingresosCentimos: body.ingresosCentimos, costosCentimos: body.costosCentimos, vencimientoNuevo: body.venceEl });
+      ingresosCentimos: body.pendiente ? 0 : body.ingresosCentimos, costosCentimos: body.costosCentimos, vencimientoNuevo: body.venceEl });
+    if (body.pendiente && body.ingresosCentimos > 0) demoDebts.push({ id: crypto.randomUUID(), suscripcion_id: suscripcionId, nombre: body.nombre, plataforma: platform.nombre, concepto: 'Alta pendiente', importe_centimos: body.ingresosCentimos, fecha: body.fechaInicio });
     return { id, suscripcionId };
   }
   const client = url.pathname.match(/^\/clientes\/([^/]+)$/);
@@ -205,8 +247,9 @@ export async function demoApi(path, options = {}) {
     value.version += 1;
     const id = crypto.randomUUID();
     movements.push({ id, suscripcionId: value.suscripcionId, tipo: 'renovacion', fechaCobro: body.fechaCobro,
-      ingresosCentimos: body.ingresosCentimos, costosCentimos: body.costosCentimos,
+      ingresosCentimos: body.pendiente ? 0 : body.ingresosCentimos, costosCentimos: body.costosCentimos,
       vencimientoNuevo: body.venceEl });
+    if (body.pendiente && body.ingresosCentimos > 0) demoDebts.push({ id: crypto.randomUUID(), suscripcion_id: value.suscripcionId, nombre: value.nombre, plataforma: value.plataforma, concepto: 'Renovación pendiente', importe_centimos: body.ingresosCentimos, fecha: body.fechaCobro });
     return { id, version: value.version };
   }
   throw new Error('Acción no disponible en la demostración');

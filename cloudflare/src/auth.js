@@ -41,6 +41,8 @@ async function authenticatedSession(request, env) {
   try {
     const value = JSON.parse(new TextDecoder().decode(base64urlToBytes(payload)));
     if (value.sub !== 'local-admin' || value.exp <= Date.now() || value.email !== env.AUTHORIZED_ADMIN_EMAIL?.trim()) return null;
+    const security = await env.DB.prepare('SELECT session_version FROM seguridad_admin WHERE id=1').first();
+    if ((value.version || 0) !== security.session_version) return null;
     return env.DB.prepare('SELECT access_subject, correo, rol FROM operadores WHERE access_subject = ? AND activo = 1')
       .bind(value.sub).first();
   } catch {
@@ -66,8 +68,10 @@ export async function login(request, env) {
     if (raw.length <= 1000) password = JSON.parse(raw).password;
   } catch { /* invalid JSON */ }
   if (typeof password !== 'string' || password.length > 200) password = '';
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password)));
-  const expectedHash = base64urlToBytes((env.ADMIN_PASSWORD_HASH || '').trim());
+  const security = await env.DB.prepare('SELECT * FROM seguridad_admin WHERE id=1').first();
+  const hash = security.password_hash ? await derivePassword(password, base64urlToBytes(security.salt))
+    : new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password)));
+  const expectedHash = base64urlToBytes(security.password_hash || (env.ADMIN_PASSWORD_HASH || '').trim());
   if (!sameBytes(hash, expectedHash)) {
     const attempts = (record?.intentos || 0) + 1;
     await env.DB.prepare(`INSERT INTO login_attempts (ip, intentos, bloqueado_hasta) VALUES (?, ?, ?)
@@ -80,6 +84,7 @@ export async function login(request, env) {
     VALUES ('local-admin', ?, 'admin')`).bind(env.AUTHORIZED_ADMIN_EMAIL.trim()).run();
   const payload = bytesToBase64url(new TextEncoder().encode(JSON.stringify({
     sub: 'local-admin', email: env.AUTHORIZED_ADMIN_EMAIL.trim(), exp: Date.now() + SESSION_SECONDS * 1000,
+    version: security.session_version,
   })));
   const cookie = `${SESSION_COOKIE}=${payload}.${await sign(payload, env)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_SECONDS}`;
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...headers, 'Set-Cookie': cookie } });
@@ -98,4 +103,29 @@ export async function authenticate(request, env) {
 
 export function mayManageAccounts(actor) {
   return actor?.rol === 'admin';
+}
+
+export async function derivePassword(password, salt) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, key, 256));
+}
+
+export async function changePassword(request, env, body, actor) {
+  if (typeof body.currentPassword !== 'string' || typeof body.newPassword !== 'string'
+    || body.newPassword.length < 6 || body.newPassword.length > 200) {
+    return Response.json({ error: 'Escribe la contraseña actual y una nueva de 6 a 200 caracteres' }, { status: 400 });
+  }
+  const checked = await login(new Request(new URL('/api/login', request.url), {
+    method: 'POST', headers: request.headers, body: JSON.stringify({ password: body.currentPassword }),
+  }), env);
+  if (!checked.ok) return checked;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await derivePassword(body.newPassword, salt);
+  await env.DB.batch([
+    env.DB.prepare('UPDATE seguridad_admin SET password_hash=?,salt=?,session_version=session_version+1 WHERE id=1')
+      .bind(bytesToBase64url(hash), bytesToBase64url(salt)),
+    env.DB.prepare("INSERT INTO auditoria(id,actor_subject,accion,objeto_tipo,objeto_id) VALUES(?,?,'cambiar_password','seguridad','admin')")
+      .bind(crypto.randomUUID(), actor.access_subject),
+  ]);
+  return logout();
 }

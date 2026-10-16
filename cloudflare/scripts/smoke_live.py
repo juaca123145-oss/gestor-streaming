@@ -39,7 +39,7 @@ status, summary = call('/api/resumen')
 assert status == 200 and summary['clientes'] == 456
 assert summary['margenMesCentimos'] == summary['margenExcelMesCentimos'] + summary['margenMovimientosMesCentimos']
 assert summary['margenHistoricoVerificadoCentimos'] is not None
-assert summary['saldosPendientes'] == 62
+assert summary['saldosPendientes'] == 0
 status, charts = call('/api/estadisticas')
 assert status == 200 and len(charts['meses']) == 12
 assert charts['meses'][-1]['mes'] == summary['fecha'][:7]
@@ -49,7 +49,7 @@ status, config = call('/api/configuracion')
 assert status == 200 and config['moneda'] == 'S/.' and config['prefijoDefecto'] == '+51'
 assert isinstance(config['condiciones'], dict)
 status, accounts = call('/api/cuentas')
-assert status == 200 and len(accounts['items']) == 66
+assert status == 200 and len(accounts['items']) == 85
 assert all(account['venceEl'] is None and account['fechaCompra'] is None for account in accounts['items'])
 status, clients = call('/api/clientes?pagina=1&limite=25')
 assert status == 200 and clients['total'] == 456 and len(clients['items']) == 25
@@ -58,7 +58,7 @@ assert status == 200 and len(upcoming['items']) <= 6
 assert all(item['venceEl'] >= summary['fecha'] for item in upcoming['items'])
 assert call('/api/logout', 'POST')[0] == 200
 assert call('/api/resumen')[0] == 401
-print(json.dumps({'login': 'ok', 'clients': 456, 'accounts': 66,
+print(json.dumps({'login': 'ok', 'clients': 456, 'accounts': 85,
                   'legacyAccountDates': 'blank', 'upcoming': len(upcoming['items']),
                   'monthlyMarginCents': summary['margenMesCentimos'],
                   'verifiedHistoricalMarginCents': summary['margenHistoricoVerificadoCentimos'],
