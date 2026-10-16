@@ -36,7 +36,7 @@ npx wrangler d1 export dorostream --remote --output .migration/remote-export.sql
 python scripts/verify_export.py "C:\ruta\DoroStream Database.xlsx"
 ```
 
-El SQL generado se aplica únicamente sobre una base vacía. Antes de importar otro Excel, exporta D1 y planifica una conciliación incremental.
+El importador también genera `referencias_pendientes.csv` y `saldos_pendientes.csv` dentro de `.migration/` para revisar los casos que el Excel no permite conciliar. El SQL generado se aplica únicamente sobre una base vacía. Antes de importar otro Excel, exporta D1 y planifica una conciliación incremental.
 
 ## Despliegue
 

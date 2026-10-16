@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import csv
 import datetime as dt
 import hashlib
 import json
@@ -125,6 +126,8 @@ def main():
                           [aid, ciphertext, nonce, 1]))
 
     references = collections.Counter()
+    pending_references = []
+    pending_balances = []
     money_pending = 0
     history_count = 0
     for client in clients:
@@ -136,6 +139,10 @@ def main():
         valid_matches = [a for a in matches if a['plataforma'] == platform]
         account_id = str(valid_matches[0]['id']) if len(valid_matches) == 1 else None
         references['linked' if account_id else 'blank' if not ref else 'unresolved'] += 1
+        if ref and not account_id:
+            pending_references.append({'cliente_id': cid, 'nombre': original_text(client['nombre']),
+                'plataforma': platform, 'cuenta_en_excel': ref,
+                'coincidencias_misma_plataforma': len(valid_matches)})
         prefix = original_text(client['prefijo']) or '+51'
         if not prefix.startswith('+'):
             prefix = '+' + prefix
@@ -158,6 +165,11 @@ def main():
         renewals = int(renewals) if renewals is not None else None
         review = 'verificado' if all(value is not None for value in (income, cost, renewals)) else 'pendiente'
         money_pending += review == 'pendiente'
+        if review == 'pendiente':
+            pending_balances.append({'cliente_id': cid, 'nombre': original_text(client['nombre']),
+                'ingresos_en_excel': original_text(client['ingresosTotales']),
+                'costos_en_excel': original_text(client['costosTotales']),
+                'renovaciones_en_excel': original_text(client['renovaciones'])})
         sql.append(insert('saldos_iniciales', ['suscripcion_id', 'ingresos_centimos', 'costos_centimos', 'renovaciones', 'estado_revision'],
                           [sid, income, cost, renewals, review]))
         if client['historial'] is not None:
@@ -201,6 +213,12 @@ def main():
               'accountDatesBlank': len(accounts), 'floatingPointArtifactsRounded': len(FLOAT_ARTIFACTS),
               'archiveRoundTrip': True}
     (OUT / 'audit.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+    for filename, records in [('referencias_pendientes.csv', pending_references),
+                              ('saldos_pendientes.csv', pending_balances)]:
+        with (OUT / filename).open('w', newline='', encoding='utf-8-sig') as stream:
+            writer = csv.DictWriter(stream, fieldnames=records[0].keys())
+            writer.writeheader()
+            writer.writerows(records)
     print(json.dumps(report, indent=2))
 
 
