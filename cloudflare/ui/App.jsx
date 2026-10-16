@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, RefreshCw, KeyRound, Plus, Search, X,
-  ArrowRight, Eye, EyeOff, CalendarDays, AlertCircle, Wallet,
+  ArrowRight, Eye, EyeOff, CalendarDays, AlertCircle, Wallet, MessageCircle,
 } from 'lucide-react';
 import { demoApi } from './demo.js';
 
@@ -64,6 +64,25 @@ function accountStatus(date) {
   if (days < 0) return { text: `Venció hace ${-days} días`, className: 'danger' };
   if (days === 0) return { text: 'Vence hoy', className: 'warning' };
   return { text: `Quedan ${days} días`, className: days <= 7 ? 'warning' : 'success' };
+}
+
+function renewalWhatsAppUrl(client, subscription = client) {
+  const phone = `${client.prefijo || '+51'}${client.telefono || ''}`.replace(/\D/g, '');
+  if (phone.length < 8 || !subscription.venceEl) return null;
+  const days = Math.round((Date.parse(`${subscription.venceEl}T00:00:00Z`) - Date.parse(`${limaToday()}T00:00:00Z`)) / 86_400_000);
+  const expiry = days > 1 ? `vence en *${days} días*` : days === 1 ? 'vence *mañana*'
+    : days === 0 ? 'vence *hoy*' : `*venció* hace *${-days} días*`;
+  const account = subscription.cuentaOriginal ? ` (Cuenta: ${subscription.cuentaOriginal})` : '';
+  const message = `¡Hola ${client.nombre}! 😊 Te escribo para recordarte que tu suscripción de *${subscription.plataforma}*${account} ${expiry} (${subscription.venceEl}). ¿Deseas renovar tu servicio con nosotros para no perder el acceso? ¡Quedo atento/a!`;
+  return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+}
+
+function RenewalButton({ client, subscription, compact = false }) {
+  const url = renewalWhatsAppUrl(client, subscription);
+  return <a className={`secondary renewal-button${compact ? ' compact' : ''}${!url ? ' disabled' : ''}`}
+    href={url || undefined} target="_blank" rel="noopener noreferrer"
+    aria-disabled={!url} title={url ? 'Abrir mensaje de renovación en WhatsApp' : 'Este cliente no tiene un teléfono válido'}
+    onClick={url ? undefined : (event) => event.preventDefault()}><MessageCircle size={16} />{compact ? 'Avisar' : 'Enviar renovación'}</a>;
 }
 
 function emptyAccount() { return { plataformaId: '', identificador: '', contrasena: '', fechaCompra: limaToday(), venceEl: addMonth(limaToday()), codigosUrl: '', codigoPassword: '', nota: '' }; }
@@ -246,6 +265,9 @@ export default function App() {
   const title = view === 'resumen' ? 'Resumen de suscripciones'
     : view === 'clientes' ? 'Directorio de clientes'
       : view === 'cuentas' ? 'Cuentas de servicio' : selected?.nombre || 'Cliente';
+  const accountGroups = platforms.map((platform) => ({ ...platform,
+    items: accounts.filter((account) => account.plataformaId === platform.id),
+  })).filter((group) => group.items.length);
 
   if (!DEMO && !signedIn) return <div className="login-page"><form className="login-card" onSubmit={signIn}>
     <div className="brand login-brand"><span className="brand-mark">▶</span>DoroStream</div>
@@ -289,26 +311,30 @@ export default function App() {
         {view === 'resumen' && <>
           <section className="stat-grid" aria-label="Indicadores"><Stat icon={Users} label="Clientes" value={summary?.clientes ?? '—'} />
             <Stat icon={CalendarDays} label="Activas" value={summary?.activas ?? '—'} />
+            <Stat icon={Wallet} label="Ganancia del mes" value={summary ? money(summary.margenMesCentimos) : '—'} tone="green"
+              detail={summary ? `${summary.ventasExcelMes} ventas del Excel: ${money(summary.margenExcelMesCentimos)} · Movimientos nuevos: ${money(summary.margenMovimientosMesCentimos)}` : ''} />
+            <Stat icon={Wallet} label="Histórico verificado" value={summary ? money(summary.margenHistoricoVerificadoCentimos) : '—'}
+              detail={summary?.saldosPendientes ? `${summary.saldosPendientes} saldos del Excel por conciliar` : 'Todos los saldos conciliados'} />
             <Stat icon={AlertCircle} label="Vencen en 7 días" value={summary?.proximas ?? '—'} tone="warning" />
-            <Stat icon={Wallet} label="Margen registrado este mes" value={summary ? money(summary.margenMesCentimos) : '—'} tone="green" /></section>
+            <Stat icon={AlertCircle} label="Vencidas" value={summary?.vencidas ?? '—'} tone="warning" /></section>
           <section className="panel"><div className="panel-head"><div><h2>Próximos vencimientos</h2><p>Prioriza clientes que necesitan seguimiento.</p></div><button className="text-button" onClick={() => setView('clientes')}>Ver directorio <ArrowRight size={16} /></button></div>
             <div className="list">{upcoming.map((c) => <ClientRow key={c.id} client={c} onClick={() => selectClient(c.id)} />)}
               {!upcoming.length && <p className="empty">No hay próximos vencimientos.</p>}</div></section>
         </>}
 
         {view === 'clientes' && <section className="panel"><form className="toolbar" onSubmit={searchClients}><div className="search-box"><Search size={18} /><input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Buscar nombre o teléfono" aria-label="Buscar nombre o teléfono" /></div><button className="secondary" type="submit">Buscar</button></form>
-          <div className="list">{clients.map((c) => <ClientRow key={c.id} client={c} onClick={() => selectClient(c.id)} />)}
+          <div className="list">{clients.map((c) => <div className="client-entry" key={c.id}><ClientRow client={c} onClick={() => selectClient(c.id)} /><RenewalButton client={c} compact /></div>)}
             {!clients.length && !loading && <p className="empty">No se encontraron clientes.</p>}</div>
           <div className="pagination"><span>{total} clientes · Página {page}</span><div><button className="secondary" disabled={page <= 1} onClick={async () => { const next = page - 1; setPage(next); await loadClients(next); }}>Anterior</button><button className="secondary" disabled={page * 25 >= total} onClick={async () => { const next = page + 1; setPage(next); await loadClients(next); }}>Siguiente</button></div></div>
         </section>}
 
         {view === 'detalle' && selected && <><button className="text-button back" onClick={() => setView('clientes')}>← Volver al directorio</button>
           <section className="panel"><div className="panel-head"><div><h2>Datos del cliente</h2><p>{selected.prefijo} {selected.telefono || 'Sin teléfono'}</p></div></div>
-            <div className="list">{selected.suscripciones.map((s) => <div className="detail-row" key={s.id}><div><strong>{s.plataforma}</strong><small>{s.perfil || 'Sin perfil'} · Vence {s.venceEl}</small>{s.cuentaOriginal && <small>Cuenta en Excel: {s.cuentaOriginal}{!s.cuentaId ? ' · pendiente de vincular' : ''}</small>}<small>Precio: compra {s.precioCompraCentimos == null ? '—' : money(s.precioCompraCentimos)} · venta {s.precioVentaCentimos == null ? '—' : money(s.precioVentaCentimos)}</small><small>Histórico: ingresos {s.ingresosHistoricosCentimos == null ? 'Por conciliar' : money(s.ingresosHistoricosCentimos)} · costos {s.costosHistoricosCentimos == null ? 'Por conciliar' : money(s.costosHistoricosCentimos)} · renovaciones {s.renovacionesHistoricas ?? 'Por conciliar'}</small>{s.historialOriginal && <details className="legacy-history"><summary>Ver historial del Excel</summary><pre>{s.historialOriginal}</pre></details>}</div><span className={`pill ${status(s.venceEl).className}`}>{status(s.venceEl).text}</span><button className="secondary" onClick={() => openRenew(s)}>Renovar</button></div>)}</div></section>
+            <div className="list">{selected.suscripciones.map((s) => <div className="detail-row" key={s.id}><div><strong>{s.plataforma}</strong><small>{s.perfil || 'Sin perfil'} · Vence {s.venceEl}</small>{s.cuentaOriginal && <small>Cuenta en Excel: {s.cuentaOriginal}{!s.cuentaId ? ' · pendiente de vincular' : ''}</small>}<small>Precio: compra {s.precioCompraCentimos == null ? '—' : money(s.precioCompraCentimos)} · venta {s.precioVentaCentimos == null ? '—' : money(s.precioVentaCentimos)}</small><small>Histórico: ingresos {s.ingresosHistoricosCentimos == null ? 'Por conciliar' : money(s.ingresosHistoricosCentimos)} · costos {s.costosHistoricosCentimos == null ? 'Por conciliar' : money(s.costosHistoricosCentimos)} · renovaciones {s.renovacionesHistoricas ?? 'Por conciliar'}</small>{s.historialOriginal && <details className="legacy-history"><summary>Ver historial del Excel</summary><pre>{s.historialOriginal}</pre></details>}</div><span className={`pill ${status(s.venceEl).className}`}>{status(s.venceEl).text}</span><RenewalButton client={selected} subscription={s} /><button className="secondary" onClick={() => openRenew(s)}>Registrar renovación</button></div>)}</div></section>
           <section className="panel"><div className="panel-head"><div><h2>Movimientos recientes</h2><p>Cobros y costos posteriores a la migración.</p></div></div><div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Cobro</th><th>Costo</th><th>Margen</th></tr></thead><tbody>{selected.movimientos.map((m) => <tr key={m.id}><td>{m.fechaCobro}</td><td>{m.tipo}</td><td>{money(m.ingresosCentimos)}</td><td>{money(m.costosCentimos)}</td><td>{money(m.ingresosCentimos - m.costosCentimos)}</td></tr>)}</tbody></table>{!selected.movimientos.length && <p className="empty">Sin movimientos nuevos.</p>}</div></section>
         </>}
 
-        {view === 'cuentas' && <section className="panel"><div className="panel-head"><div><h2>Inventario de cuentas</h2><p>Fecha de compra y días hasta vencer. Las credenciales se revelan sólo a administradores.</p></div></div><div className="list">{accounts.map((a) => <div className="account-row" key={a.id}><span className="account-mark"><KeyRound size={18} /></span><div className="account-info"><strong>{a.plataforma}</strong><small>{a.identificador} · {a.perfilesAsignados} perfiles</small><small>Compra: {a.fechaCompra || 'Sin fecha'} · Vence: {a.venceEl || 'Sin fecha'}</small>{a.codigosUrl && <a href={a.codigosUrl} target="_blank" rel="noopener noreferrer" className="account-link">Abrir web de códigos ↗</a>}{a.nota && <p className="account-note">{a.nota}</p>}</div><span className={`pill ${accountStatus(a.venceEl).className}`}>{accountStatus(a.venceEl).text}</span><button className="secondary" onClick={() => editAccount(a)}>Editar</button><button className="secondary" onClick={() => reveal(a.id)}>{revealed?.accountId === a.id ? <EyeOff size={16} /> : <Eye size={16} />}{revealed?.accountId === a.id ? 'Ocultar en 20 s' : 'Revelar'}</button>{revealed?.accountId === a.id && <p className="revealed">Contraseña: <strong>{revealed.password}</strong>{revealed.codePassword && <> · Contraseña web de códigos: <strong>{revealed.codePassword}</strong></>}</p>}</div>)}
+        {view === 'cuentas' && <section className="panel"><div className="panel-head"><div><h2>Inventario de cuentas</h2><p>{accounts.length} cuentas agrupadas por plataforma. Abre un grupo para ver sus cuentas y vencimientos.</p></div></div><div className="account-groups">{accountGroups.map((group, index) => <details className="account-group" key={group.id} open={index === 0}><summary><span>{group.nombre}</span><span className="group-count">{group.items.length} {group.items.length === 1 ? 'cuenta' : 'cuentas'}</span></summary><div className="list">{group.items.map((a) => <div className="account-row" key={a.id}><span className="account-mark"><KeyRound size={18} /></span><div className="account-info"><strong>{a.identificador}</strong><small>{a.perfilesAsignados} perfiles · Compra: {a.fechaCompra || 'Sin fecha'} · Vence: {a.venceEl || 'Sin fecha'}</small>{a.codigosUrl && <a href={a.codigosUrl} target="_blank" rel="noopener noreferrer" className="account-link">Abrir web de códigos ↗</a>}{a.nota && <p className="account-note">{a.nota}</p>}</div><span className={`pill ${accountStatus(a.venceEl).className}`}>{accountStatus(a.venceEl).text}</span><button className="secondary" onClick={() => editAccount(a)}>Editar</button><button className="secondary" onClick={() => reveal(a.id)}>{revealed?.accountId === a.id ? <EyeOff size={16} /> : <Eye size={16} />}{revealed?.accountId === a.id ? 'Ocultar en 20 s' : 'Revelar'}</button>{revealed?.accountId === a.id && <p className="revealed">Contraseña: <strong>{revealed.password}</strong>{revealed.codePassword && <> · Contraseña web de códigos: <strong>{revealed.codePassword}</strong></>}</p>}</div>)}</div></details>)}
             {!accounts.length && !loading && <p className="empty">No hay cuentas cargadas.</p>}</div></section>}
       </main>
     </div>
@@ -325,7 +351,7 @@ export default function App() {
 
 function Field({ label, children }) { return <label className="field"><span>{label}</span>{children}</label>; }
 
-function Stat({ icon: Icon, label, value, tone = '' }) { return <div className={`stat ${tone}`}><span className="stat-label">{label}<Icon size={17} /></span><strong>{value}</strong></div>; }
+function Stat({ icon: Icon, label, value, tone = '', detail = '' }) { return <div className={`stat ${tone}`}><span className="stat-label">{label}<Icon size={17} /></span><strong>{value}</strong>{detail && <small className="stat-detail">{detail}</small>}</div>; }
 
 function ClientRow({ client, onClick }) {
   const state = status(client.venceEl);

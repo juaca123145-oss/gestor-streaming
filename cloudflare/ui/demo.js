@@ -19,7 +19,7 @@ const accounts = [
 ];
 
 const clients = [
-  { id: 'demo-1', nombre: 'Ana Morales', prefijo: '+51', telefono: '900000001', plataformaId: 'netflix', plataforma: 'Netflix', cuentaId: 'cuenta-1', venceEl: date(0), estado: 'activa', version: 1, suscripcionId: 'sub-1', perfil: 'Principal' },
+  { id: 'demo-1', nombre: 'Ana Morales', prefijo: '+51', telefono: '900000001', plataformaId: 'netflix', plataforma: 'Netflix', cuentaId: 'cuenta-1', cuentaOriginal: 'ana@ejemplo.test', venceEl: date(0), estado: 'activa', version: 1, suscripcionId: 'sub-1', perfil: 'Principal' },
   { id: 'demo-2', nombre: 'Carlos Rojas', prefijo: '+51', telefono: '900000002', plataformaId: 'spotify', plataforma: 'Spotify', cuentaId: 'cuenta-2', venceEl: date(1), estado: 'activa', version: 1, suscripcionId: 'sub-2', perfil: 'Individual' },
   { id: 'demo-3', nombre: 'Lucía Vega', prefijo: '+51', telefono: '900000003', plataformaId: 'disney', plataforma: 'Disney+', cuentaId: 'cuenta-3', venceEl: date(3), estado: 'activa', version: 1, suscripcionId: 'sub-3', perfil: 'Perfil 2' },
   { id: 'demo-4', nombre: 'Jorge Pérez', prefijo: '+51', telefono: '900000004', plataformaId: 'max', plataforma: 'Max', cuentaId: null, venceEl: date(-2), estado: 'activa', version: 1, suscripcionId: 'sub-4', perfil: 'Familiar' },
@@ -46,6 +46,13 @@ export async function demoApi(path, options = {}) {
       vencidas: clients.filter((c) => c.venceEl < current).length,
       margenMesCentimos: movements.filter((m) => m.fechaCobro.slice(0, 7) === current.slice(0, 7))
         .reduce((sum, m) => sum + m.ingresosCentimos - m.costosCentimos, 0),
+      margenExcelMesCentimos: 0,
+      margenMovimientosMesCentimos: movements.filter((m) => m.fechaCobro.slice(0, 7) === current.slice(0, 7))
+        .reduce((sum, m) => sum + m.ingresosCentimos - m.costosCentimos, 0),
+      ventasExcelMes: 0,
+      ventasExcelSinImporte: 0,
+      margenHistoricoVerificadoCentimos: movements.reduce((sum, m) => sum + m.ingresosCentimos - m.costosCentimos, 0),
+      saldosPendientes: 0,
       fecha: current };
   }
   if (url.pathname === '/plataformas') return { items: clone(platforms) };
@@ -108,7 +115,7 @@ export async function demoApi(path, options = {}) {
     if (!value) throw new Error('Cliente no encontrado');
     return { id: value.id, nombre: value.nombre, prefijo: value.prefijo, telefono: value.telefono,
       suscripciones: [{ id: value.suscripcionId, plataformaId: value.plataformaId,
-        plataforma: value.plataforma, cuentaId: value.cuentaId, perfil: value.perfil,
+        plataforma: value.plataforma, cuentaId: value.cuentaId, cuentaOriginal: value.cuentaOriginal, perfil: value.perfil,
         venceEl: value.venceEl, estado: value.estado, version: value.version }],
       movimientos: clone(movements.filter((m) => m.suscripcionId === value.suscripcionId)) };
   }

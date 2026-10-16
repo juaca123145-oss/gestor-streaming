@@ -45,7 +45,7 @@ async function summary(env) {
   const [year, month] = today.split('-').map(Number);
   const nextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
-  const [clients, subscriptions, money] = await env.DB.batch([
+  const [clients, subscriptions, movementsMonth, legacyMonth, historical] = await env.DB.batch([
     env.DB.prepare('SELECT COUNT(*) AS total FROM clientes'),
     env.DB.prepare(`SELECT
       SUM(CASE WHEN estado = 'activa' AND vence_el >= ? THEN 1 ELSE 0 END) AS activas,
@@ -54,13 +54,30 @@ async function summary(env) {
       FROM suscripciones`).bind(today, today, week, today),
     env.DB.prepare(`SELECT COALESCE(SUM(ingresos_centimos - costos_centimos), 0) AS margen_centimos
       FROM movimientos WHERE fecha_cobro >= ? AND fecha_cobro < ?`).bind(monthStart, nextMonth),
+    env.DB.prepare(`SELECT COUNT(*) AS ventas, COALESCE(SUM(precio_venta_centimos - precio_compra_centimos), 0) AS margen_centimos,
+      SUM(CASE WHEN precio_venta_centimos IS NULL OR precio_compra_centimos IS NULL THEN 1 ELSE 0 END) AS sin_importe
+      FROM suscripciones WHERE legacy_cliente_id IS NOT NULL AND fecha_compra >= ? AND fecha_compra < ?`)
+      .bind(monthStart, nextMonth),
+    env.DB.prepare(`SELECT
+      (SELECT COALESCE(SUM(ingresos_centimos - costos_centimos), 0) FROM saldos_iniciales
+        WHERE estado_revision = 'verificado' AND ingresos_centimos IS NOT NULL AND costos_centimos IS NOT NULL)
+      + (SELECT COALESCE(SUM(ingresos_centimos - costos_centimos), 0) FROM movimientos) AS margen_centimos,
+      (SELECT COUNT(*) FROM saldos_iniciales WHERE estado_revision = 'pendiente') AS pendientes`),
   ]);
+  const margenExcelMes = legacyMonth.results[0].margen_centimos;
+  const margenMovimientosMes = movementsMonth.results[0].margen_centimos;
   return json({
     clientes: clients.results[0].total,
     activas: subscriptions.results[0].activas || 0,
     proximas: subscriptions.results[0].proximas || 0,
     vencidas: subscriptions.results[0].vencidas || 0,
-    margenMesCentimos: money.results[0].margen_centimos,
+    margenMesCentimos: margenExcelMes + margenMovimientosMes,
+    margenExcelMesCentimos: margenExcelMes,
+    margenMovimientosMesCentimos: margenMovimientosMes,
+    ventasExcelMes: legacyMonth.results[0].ventas,
+    ventasExcelSinImporte: legacyMonth.results[0].sin_importe || 0,
+    margenHistoricoVerificadoCentimos: historical.results[0].margen_centimos,
+    saldosPendientes: historical.results[0].pendientes,
     fecha: today,
   });
 }
@@ -78,7 +95,7 @@ async function listClients(url, env) {
   ) LEFT JOIN plataformas p ON p.id = s.plataforma_id ${condition}`;
   const [rows, count] = await env.DB.batch([
     env.DB.prepare(`SELECT c.id, c.nombre, c.prefijo, c.telefono, s.id AS suscripcionId,
-      s.vence_el AS venceEl, s.estado, s.version, p.nombre AS plataforma
+      s.vence_el AS venceEl, s.estado, s.version, s.legacy_cuenta AS cuentaOriginal, p.nombre AS plataforma
       ${base} ORDER BY s.vence_el ASC, c.nombre COLLATE NOCASE ASC LIMIT ? OFFSET ?`)
       .bind(...params, limit, (page - 1) * limit),
     env.DB.prepare(`SELECT COUNT(*) AS total ${base}`).bind(...params),
