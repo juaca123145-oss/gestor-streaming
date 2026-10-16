@@ -55,6 +55,16 @@ export async function demoApi(path, options = {}) {
       saldosPendientes: 0,
       fecha: current };
   }
+  if (url.pathname === '/estadisticas') return {
+    meses: Array.from({ length: 12 }, (_, index) => {
+      const mes = new Date(Date.UTC(today.getFullYear(), today.getMonth() - 11 + index, 1)).toISOString().slice(0, 7);
+      return { mes, margenCentimos: movements.filter((movement) => movement.fechaCobro.startsWith(mes))
+        .reduce((sum, movement) => sum + movement.ingresosCentimos - movement.costosCentimos, 0) };
+    }),
+    plataformas: platforms.map((platform) => ({ ...platform,
+      suscripciones: clients.filter((client) => client.plataformaId === platform.id).length,
+    })).sort((a, b) => b.suscripciones - a.suscripciones),
+  };
   if (url.pathname === '/plataformas') return { items: clone(platforms) };
   if (url.pathname === '/proximos') return { items: clone(clients.filter((c) => c.venceEl >= date(0))
     .sort((a, b) => a.venceEl.localeCompare(b.venceEl)).slice(0, 6)) };

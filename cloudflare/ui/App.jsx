@@ -94,6 +94,7 @@ export default function App() {
   const [signedIn, setSignedIn] = useState(DEMO);
   const [loginPassword, setLoginPassword] = useState('');
   const [summary, setSummary] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
   const [clients, setClients] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -115,8 +116,9 @@ export default function App() {
   const [notice, setNotice] = useState('');
 
   async function loadOverview() {
-    const [s, a, p, u] = await Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos')]);
+    const [s, a, p, u, charts] = await Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/estadisticas')]);
     setSummary(s);
+    setAnalytics(charts);
     setAccounts(a.items);
     setPlatforms(p.items);
     setUpcoming(u.items);
@@ -131,11 +133,11 @@ export default function App() {
   useEffect(() => {
     let active = true;
     (DEMO ? Promise.resolve() : api('/session'))
-      .then(() => Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/clientes?pagina=1&limite=25')]))
-      .then(([s, a, p, u, c]) => {
+      .then(() => Promise.all([api('/resumen'), api('/cuentas'), api('/plataformas'), api('/proximos'), api('/clientes?pagina=1&limite=25'), api('/estadisticas')]))
+      .then(([s, a, p, u, c, charts]) => {
         if (!active) return;
         setSignedIn(true);
-        setSummary(s); setAccounts(a.items); setPlatforms(p.items); setUpcoming(u.items); setClients(c.items); setTotal(c.total);
+        setSummary(s); setAnalytics(charts); setAccounts(a.items); setPlatforms(p.items); setUpcoming(u.items); setClients(c.items); setTotal(c.total);
       })
       .catch((cause) => { if (active && cause.message !== 'Acceso no autorizado') setError(cause.message); })
       .finally(() => { if (active) setLoading(false); });
@@ -317,6 +319,10 @@ export default function App() {
               detail={summary?.saldosPendientes ? `${summary.saldosPendientes} saldos del Excel por conciliar` : 'Todos los saldos conciliados'} />
             <Stat icon={AlertCircle} label="Vencen en 7 días" value={summary?.proximas ?? '—'} tone="warning" />
             <Stat icon={AlertCircle} label="Vencidas" value={summary?.vencidas ?? '—'} tone="warning" /></section>
+          <section className="charts-grid" aria-label="Gráficas del negocio">
+            <div className="panel chart-panel"><div className="panel-head"><div><h2>Ganancia por mes</h2><p>Últimos 12 meses · ventas del Excel y movimientos nuevos</p></div></div><MonthlyChart months={analytics?.meses || []} /></div>
+            <div className="panel chart-panel"><div className="panel-head"><div><h2>Suscripciones por plataforma</h2><p>Distribución de las suscripciones registradas</p></div></div><PlatformChart platforms={analytics?.plataformas || []} /></div>
+          </section>
           <section className="panel"><div className="panel-head"><div><h2>Próximos vencimientos</h2><p>Prioriza clientes que necesitan seguimiento.</p></div><button className="text-button" onClick={() => setView('clientes')}>Ver directorio <ArrowRight size={16} /></button></div>
             <div className="list">{upcoming.map((c) => <ClientRow key={c.id} client={c} onClick={() => selectClient(c.id)} />)}
               {!upcoming.length && <p className="empty">No hay próximos vencimientos.</p>}</div></section>
@@ -352,6 +358,42 @@ export default function App() {
 function Field({ label, children }) { return <label className="field"><span>{label}</span>{children}</label>; }
 
 function Stat({ icon: Icon, label, value, tone = '', detail = '' }) { return <div className={`stat ${tone}`}><span className="stat-label">{label}<Icon size={17} /></span><strong>{value}</strong>{detail && <small className="stat-detail">{detail}</small>}</div>; }
+
+function MonthlyChart({ months }) {
+  if (!months.length) return <p className="empty">Cargando gráfica…</p>;
+  const width = 720; const left = 67; const right = 18; const top = 26; const plotHeight = 180;
+  const values = months.map((item) => item.margenCentimos);
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(1, ...values);
+  const scale = (value) => top + (maximum - value) * plotHeight / (maximum - minimum);
+  const baseline = scale(0);
+  const step = (width - left - right) / months.length;
+  const ticks = [minimum, (minimum + maximum) / 2, maximum];
+  return <div className="monthly-chart"><svg viewBox="0 0 720 252" role="img" aria-label="Ganancia mensual de los últimos doce meses, en soles">
+    {ticks.map((tick, index) => <g key={index}><line x1={left} x2={width - right} y1={scale(tick)} y2={scale(tick)} className="chart-gridline" /><text x={left - 9} y={scale(tick) + 4} textAnchor="end" className="chart-axis">{Math.round(tick / 100)}</text></g>)}
+    <line x1={left} x2={width - right} y1={baseline} y2={baseline} className="chart-baseline" />
+    {months.map((item, index) => {
+      const barY = scale(item.margenCentimos);
+      const x = left + index * step + step * 0.18;
+      const label = `${item.mes.slice(5)}/${item.mes.slice(2, 4)}`;
+      return <g key={item.mes}><rect x={x} y={Math.min(barY, baseline)} width={step * 0.64}
+        height={Math.max(2, Math.abs(baseline - barY))} rx="5"
+        className={item.margenCentimos < 0 ? 'chart-bar negative' : index === months.length - 1 ? 'chart-bar current' : 'chart-bar'}>
+        <title>{item.mes}: {money(item.margenCentimos)}</title></rect>
+        <text x={x + step * 0.32} y="234" textAnchor="middle" className="chart-axis">{label}</text></g>;
+    })}
+    <text x="8" y="16" className="chart-axis">S/</text>
+  </svg><p className="chart-footnote">Pasa el cursor sobre una barra para ver el importe exacto.</p></div>;
+}
+
+function PlatformChart({ platforms }) {
+  if (!platforms.length) return <p className="empty">Cargando gráfica…</p>;
+  const maximum = Math.max(1, ...platforms.map((item) => item.suscripciones));
+  return <div className="platform-chart"><ol>{platforms.map((item) => <li key={item.id}>
+    <div className="platform-chart-label"><span>{item.nombre}</span><strong>{item.suscripciones}</strong></div>
+    <div className="platform-track"><span style={{ width: `${100 * item.suscripciones / maximum}%` }} /></div>
+  </li>)}</ol></div>;
+}
 
 function ClientRow({ client, onClick }) {
   const state = status(client.venceEl);

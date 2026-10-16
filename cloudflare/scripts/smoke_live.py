@@ -40,6 +40,11 @@ assert status == 200 and summary['clientes'] == 456
 assert summary['margenMesCentimos'] == summary['margenExcelMesCentimos'] + summary['margenMovimientosMesCentimos']
 assert summary['margenHistoricoVerificadoCentimos'] is not None
 assert summary['saldosPendientes'] == 62
+status, charts = call('/api/estadisticas')
+assert status == 200 and len(charts['meses']) == 12
+assert charts['meses'][-1]['mes'] == summary['fecha'][:7]
+assert charts['meses'][-1]['margenCentimos'] == summary['margenMesCentimos']
+assert sum(row['suscripciones'] for row in charts['plataformas']) == 456
 status, accounts = call('/api/cuentas')
 assert status == 200 and len(accounts['items']) == 66
 assert all(account['venceEl'] is None and account['fechaCompra'] is None for account in accounts['items'])

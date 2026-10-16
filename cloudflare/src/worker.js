@@ -82,6 +82,35 @@ async function summary(env) {
   });
 }
 
+async function analytics(env) {
+  const today = limaToday();
+  const [year, month] = today.split('-').map(Number);
+  const firstMonth = new Date(Date.UTC(year, month - 12, 1)).toISOString().slice(0, 7);
+  const nextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+  const [monthly, platforms] = await env.DB.batch([
+    env.DB.prepare(`SELECT mes, SUM(margen_centimos) AS margenCentimos FROM (
+      SELECT substr(fecha_compra, 1, 7) AS mes,
+        precio_venta_centimos - precio_compra_centimos AS margen_centimos
+      FROM suscripciones WHERE legacy_cliente_id IS NOT NULL
+        AND fecha_compra >= ? AND fecha_compra < ?
+        AND precio_venta_centimos IS NOT NULL AND precio_compra_centimos IS NOT NULL
+      UNION ALL
+      SELECT substr(fecha_cobro, 1, 7) AS mes,
+        ingresos_centimos - costos_centimos AS margen_centimos
+      FROM movimientos WHERE fecha_cobro >= ? AND fecha_cobro < ?
+    ) GROUP BY mes ORDER BY mes`).bind(`${firstMonth}-01`, nextMonth, `${firstMonth}-01`, nextMonth),
+    env.DB.prepare(`SELECT p.id, p.nombre, COUNT(s.id) AS suscripciones
+      FROM plataformas p LEFT JOIN suscripciones s ON s.plataforma_id = p.id
+      GROUP BY p.id ORDER BY suscripciones DESC, p.nombre COLLATE NOCASE`),
+  ]);
+  const byMonth = new Map(monthly.results.map((row) => [row.mes, row.margenCentimos]));
+  const months = Array.from({ length: 12 }, (_, index) => {
+    const mes = new Date(Date.UTC(year, month - 12 + index, 1)).toISOString().slice(0, 7);
+    return { mes, margenCentimos: byMonth.get(mes) || 0 };
+  });
+  return json({ meses: months, plataformas: platforms.results });
+}
+
 async function listClients(url, env) {
   const page = Math.max(1, Math.min(10_000, Number.parseInt(url.searchParams.get('pagina') || '1', 10) || 1));
   const rawLimit = Number.parseInt(url.searchParams.get('limite') || '25', 10) || 25;
@@ -368,6 +397,7 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/logout') return logout();
       if (request.method === 'GET' && url.pathname === '/api/session') return json({ correo: actor.correo, rol: actor.rol });
       if (request.method === 'GET' && url.pathname === '/api/resumen') return summary(env);
+      if (request.method === 'GET' && url.pathname === '/api/estadisticas') return analytics(env);
       if (request.method === 'GET' && url.pathname === '/api/proximos') return upcomingClients(env);
       if (request.method === 'GET' && url.pathname === '/api/clientes') return listClients(url, env);
       const client = url.pathname.match(/^\/api\/clientes\/([^/]+)$/);

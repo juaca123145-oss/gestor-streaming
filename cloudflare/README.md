@@ -18,6 +18,7 @@ La nueva PWA se sirve desde un Cloudflare Worker con D1. El despliegue está en 
 - Las cuentas aparecen agrupadas por plataforma; cada grupo se puede abrir o cerrar.
 - «Ganancia del mes» suma las ventas importadas cuya fecha de compra cae en el mes actual y los movimientos registrados después de la migración en ese mes. El desglose aparece bajo la cifra. Las ventas importadas usan `precio_venta_centimos - precio_compra_centimos`, igual que el cálculo mensual de la aplicación anterior.
 - «Histórico verificado» suma los saldos del Excel marcados como verificados y los movimientos nuevos. Los 62 saldos pendientes quedan fuera de esa cifra hasta conciliarlos; no se convierten en cero.
+- El resumen incluye gráficas de ganancia mensual (12 meses) y suscripciones por plataforma. La barra del mes actual usa el mismo cálculo que «Ganancia del mes». Las cifras de las gráficas se obtienen de `/api/estadisticas`, sin enviar contraseñas ni datos personales.
 - El botón «Avisar» del directorio y «Enviar renovación» del detalle abren WhatsApp con el recordatorio preescrito. No envían el mensaje automáticamente. Si falta un teléfono válido, el enlace queda deshabilitado.
 
 ## Desarrollo
