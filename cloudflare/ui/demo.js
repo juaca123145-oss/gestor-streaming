@@ -15,9 +15,9 @@ const settings = { moneda: 'S/.', prefijoDefecto: '+51', proveedorNombre: 'Prove
   proveedorTelefono: '+51 900 000 000', condiciones: { Netflix: 'Usar solo el perfil asignado.' } };
 
 const accounts = [
-  { id: 'cuenta-1', plataformaId: 'netflix', plataforma: 'Netflix', identificador: 'n***@ejemplo.test', estado: 'activa', perfilesAsignados: 2, password: 'CLAVE-DEMO-1', fechaCompra: date(-22), venceEl: date(8), codigosUrl: 'https://example.com/', codigoPassword: 'CODIGO-DEMO', nota: 'Cuenta de ejemplo' },
-  { id: 'cuenta-2', plataformaId: 'spotify', plataforma: 'Spotify', identificador: 's***@ejemplo.test', estado: 'activa', perfilesAsignados: 1, password: 'CLAVE-DEMO-2', fechaCompra: date(-30), venceEl: date(0), codigosUrl: null, codigoPassword: null, nota: null },
-  { id: 'cuenta-3', plataformaId: 'disney', plataforma: 'Disney+', identificador: 'd***@ejemplo.test', estado: 'activa', perfilesAsignados: 1, password: 'CLAVE-DEMO-3', fechaCompra: null, venceEl: null, codigosUrl: null, codigoPassword: null, nota: null },
+  { id: 'cuenta-1', plataformaId: 'netflix', plataforma: 'Netflix', identificador: 'netflix@ejemplo.test', estado: 'activa', perfilesAsignados: 2, password: 'CLAVE-DEMO-1', fechaCompra: date(-22), venceEl: date(8), codigosUrl: 'https://example.com/', codigoPassword: 'CODIGO-DEMO', nota: 'Cuenta de ejemplo' },
+  { id: 'cuenta-2', plataformaId: 'spotify', plataforma: 'Spotify', identificador: 'spotify@ejemplo.test', estado: 'activa', perfilesAsignados: 1, password: 'CLAVE-DEMO-2', fechaCompra: date(-30), venceEl: date(0), codigosUrl: null, codigoPassword: null, nota: null },
+  { id: 'cuenta-3', plataformaId: 'disney', plataforma: 'Disney+', identificador: 'disney@ejemplo.test', estado: 'activa', perfilesAsignados: 1, password: 'CLAVE-DEMO-3', fechaCompra: null, venceEl: null, codigosUrl: null, codigoPassword: null, nota: null },
 ];
 
 const clients = [
@@ -131,7 +131,7 @@ export async function demoApi(path, options = {}) {
     if (!platform) throw new Error('Selecciona una plataforma.');
     const id = crypto.randomUUID();
     accounts.push({ id, plataformaId: platform.id, plataforma: platform.nombre,
-      identificador: `${body.identificador[0] || '*'}***`, estado: 'activa', perfilesAsignados: 0, password: body.contrasena,
+      identificador: body.identificador.trim(), estado: 'activa', perfilesAsignados: 0, password: body.contrasena,
       fechaCompra: body.fechaCompra, venceEl: body.venceEl, codigosUrl: body.codigosUrl,
       codigoPassword: body.codigoPassword, nota: body.nota });
     return { id };

@@ -1,6 +1,6 @@
 import { authenticate, login, logout, mayManageAccounts } from './auth.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
-import { addDays, limaToday, textField, validCents, validDate } from './validation.js';
+import { addDays, limaToday, textField, validCents, validDate, normalizePhone } from './validation.js';
 import { operations } from './operations.js';
 
 const headers = {
@@ -28,12 +28,6 @@ async function bodyOf(request) {
   } catch {
     return null;
   }
-}
-
-function cleanPhone(value) {
-  if (value == null || value === '') return null;
-  const phone = String(value).trim();
-  return /^\d{5,16}$/.test(phone) ? phone : null;
 }
 
 function uuid() {
@@ -232,8 +226,9 @@ async function editClient(request, env, actor, clientId) {
     || (body.perfil != null && (typeof body.perfil !== 'string' || body.perfil.length > 100))
     || (body.pin != null && (typeof body.pin !== 'string' || (body.pin && !/^\d{1,50}$/.test(body.pin))))
     || (body.quitarPin && body.pin)) return error('Datos de cliente inválidos');
-  const phone = cleanPhone(body.telefono);
-  if (body.telefono && !phone) return error('Teléfono inválido');
+  const contact = normalizePhone(body.telefono, body.prefijo);
+  if (!contact) return error('Teléfono inválido. Usa números y espacios; el prefijo debe coincidir con el país seleccionado.');
+  const phone = contact.telefono;
   const current = await env.DB.prepare(`SELECT c.nombre, c.prefijo, c.telefono, c.archivado_en,
     s.id AS suscripcion_id, s.version, s.plataforma_id, s.cuenta_id, s.perfil,
     s.fecha_inicio, s.vence_el, s.pin_ciphertext, s.pin_nonce, s.pin_clave_version
@@ -253,7 +248,7 @@ async function editClient(request, env, actor, clientId) {
   const prior = { nombre: current.nombre, prefijo: current.prefijo, telefono: current.telefono,
     plataformaId: current.plataforma_id, cuentaId: current.cuenta_id, perfil: current.perfil,
     fechaInicio: current.fecha_inicio, venceEl: current.vence_el };
-  const next = { nombre: body.nombre.trim(), prefijo: body.prefijo, telefono: phone,
+  const next = { nombre: body.nombre.trim(), prefijo: contact.prefijo, telefono: phone,
     plataformaId: body.plataformaId, cuentaId: body.cuentaId || null,
     perfil: body.perfil?.trim() || null, fechaInicio: body.fechaInicio || null, venceEl: body.venceEl };
   const detail = JSON.stringify({ suscripcionId: body.suscripcionId, expectedVersion: body.expectedVersion,
@@ -301,10 +296,10 @@ async function createClient(request, env, actor) {
     return error('Datos de cliente inválidos');
   }
   if (body.metodoPago != null && !['Yape','Plin','Transferencia','Efectivo','Otro'].includes(body.metodoPago)) return error('Método de pago inválido');
-  const phone = cleanPhone(body.telefono);
-  if (body.telefono && !phone) return error('Teléfono inválido');
-  const prefix = typeof body.prefijo === 'string' && /^\+\d{1,4}$/.test(body.prefijo)
-    ? body.prefijo : '+51';
+  const contact = normalizePhone(body.telefono, body.prefijo || '+51');
+  if (!contact) return error('Teléfono inválido. Usa números y espacios; el prefijo debe coincidir con el país seleccionado.');
+  const phone = contact.telefono;
+  const prefix = contact.prefijo;
   const platform = await env.DB.prepare('SELECT id FROM plataformas WHERE id = ?').bind(body.plataformaId).first();
   if (!platform) return error('Plataforma no encontrada');
   if (body.cuentaId) {
@@ -425,12 +420,7 @@ async function listAccounts(env) {
     FROM cuentas_servicio a JOIN plataformas p ON p.id = a.plataforma_id
     LEFT JOIN suscripciones s ON s.cuenta_id = a.id
     GROUP BY a.id ORDER BY p.nombre, a.identificador`).all();
-  return json({ items: result.results.map((row) => {
-    const value = row.identificador;
-    const at = value.indexOf('@');
-    const masked = at > 0 ? `${value[0]}***${value.slice(at)}` : `${value.slice(0, 2)}***`;
-    return { ...row, identificador: masked };
-  }) });
+  return json({ items: result.results });
 }
 
 function accountDetails(body, existing = false) {

@@ -1,8 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { encryptSecret, decryptSecret } from '../src/crypto.js';
-import { addDays, limaToday, validCents, validDate } from '../src/validation.js';
+import { addDays, limaToday, validCents, validDate, normalizePhone } from '../src/validation.js';
 import worker from '../src/worker.js';
+
+test('phone paste formats preserve the number and avoid a duplicated country prefix', () => {
+  for (const input of ['+51 903 242 961', '903 242 961', '903242961', '+51903242961', ' +51\u00a0903 242 961 ']) {
+    assert.deepEqual(normalizePhone(input), { prefijo: '+51', telefono: '903242961' });
+  }
+  assert.deepEqual(normalizePhone('+51 903 242 961', '+54'), { prefijo: '+51', telefono: '903242961' });
+  assert.deepEqual(normalizePhone('+54 911 1234 5678', '+54'), { prefijo: '+54', telefono: '91112345678' });
+  assert.equal(normalizePhone('+54 911 1234 5678', '+51'), null);
+  assert.equal(normalizePhone('903ABC242961'), null);
+  assert.deepEqual(normalizePhone(''), { prefijo: '+51', telefono: null });
+});
 
 test('dates and money reject impossible or unsafe values', () => {
   assert.equal(validDate('2026-02-28'), true);
