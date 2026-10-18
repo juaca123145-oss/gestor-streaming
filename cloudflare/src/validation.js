@@ -13,10 +13,14 @@ export function textField(value, max = 200) {
 }
 
 export function normalizePhone(value, prefix = '+51') {
-  if (typeof prefix !== 'string' || !/^\+\d{1,4}$/.test(prefix)) return null;
+  // Clipboard text can contain invisible direction/zero-width marks on mobile.
+  const clean = (text) => text.replace(/[\s\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '');
+  if (typeof prefix !== 'string' || prefix.length > 100) return null;
+  prefix = clean(prefix);
+  if (!/^\+\d{1,4}$/.test(prefix)) return null;
   if (value == null || value === '') return { prefijo: prefix, telefono: null };
   if (typeof value !== 'string' || value.length > 100) return null;
-  let phone = value.replace(/\s/g, '');
+  let phone = clean(value).replace(/[()\-\u2010-\u2014]/g, '');
   if (!phone) return { prefijo: prefix, telefono: null };
   if (phone.startsWith('+')) {
     if (phone.startsWith('+51')) prefix = '+51';

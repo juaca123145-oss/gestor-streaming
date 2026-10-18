@@ -15,6 +15,18 @@ test('phone paste formats preserve the number and avoid a duplicated country pre
   assert.deepEqual(normalizePhone(''), { prefijo: '+51', telefono: null });
 });
 
+test('mobile clipboard phone and prefix normalize without accepting malformed numbers', () => {
+  const expected = { prefijo: '+51', telefono: '929297955' };
+  assert.deepEqual(normalizePhone('929297955', '+51'), expected);
+  assert.deepEqual(normalizePhone('\u202a929 297 955\u202c', ' +51\u200e '), expected);
+  assert.deepEqual(normalizePhone('\u2066+51 (929) 297-955\u2069', '+51'), expected);
+  assert.deepEqual(normalizePhone('929\u200b297\u200f955', '+51'), expected);
+  for (const input of ['929abc297955', '++51929297955', '929+297955', '929297955 ext 2']) {
+    assert.equal(normalizePhone(input, '+51'), null);
+  }
+  assert.equal(normalizePhone('929297955', '+5x'), null);
+});
+
 test('dates and money reject impossible or unsafe values', () => {
   assert.equal(validDate('2026-02-28'), true);
   assert.equal(validDate('2026-02-30'), false);

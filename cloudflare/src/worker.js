@@ -217,7 +217,7 @@ async function getClient(id, env) {
 
 async function editClient(request, env, actor, clientId) {
   const body = await bodyOf(request);
-  if (!body || !textField(body.nombre, 150) || !/^\+\d{1,4}$/.test(body.prefijo)
+  if (!body || !textField(body.nombre, 150) || typeof body.prefijo !== 'string'
     || !textField(body.suscripcionId, 100) || !textField(body.plataformaId, 100)
     || !Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 0
     || !validDate(body.venceEl) || (body.fechaInicio && !validDate(body.fechaInicio))
